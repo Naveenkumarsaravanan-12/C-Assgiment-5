@@ -1,0 +1,843 @@
+Assignment 5 | Part_B_-_Task_B2
+Notes extracted from the original PDF; page numbers retained.
+Code and outputs are also included in the screenshots folders.
+
+========== ORIGINAL PDF PAGE 26 ==========
+                                                                               Object Oriented Programming with C++ (DSA01)
+
+ Part B – Task B2: Engineer Error Conditions (5 Marks)
+
+Deliberately Constructed Errors
+
+  B2/errors.cpp
+
+  // B2 - Engineered error conditions: every one is detected, reported, and nothing leaks
+  #include <memory>
+  #include <new>
+  #include <sstream>
+  #include <vector>
+  #include "../common/payers.h"
+
+  struct Tracer {                                       // proves destruction during unwinding
+      std::string n;
+      explicit Tracer(const std::string& s) : n(s) { std::cout << "    +" << n << '\n'; }
+      ~Tracer() { std::cout << "    -" << n << '\n'; }
+  };
+
+  // Parse "OP patient consultation tests" / "DC patient PACKAGE" ... from one input line
+  std::unique_ptr<Bill> parseBill(const std::string& line, int no)
+  {
+      Tracer t("parseBill#" + std::to_string(no));
+      std::istringstream in(line);
+      std::string kind, patient, a, b, c;
+      in >> kind >> patient >> a >> b >> c;
+      if (kind == "OP") return std::make_unique<OutPatientBill>(patient, no, std::stod(a),
+  std::stod(b));
+      if (kind == "DC") return std::make_unique<DayCareBill>(patient, no, a);
+      if (kind == "ER") return std::make_unique<EmergencyBill>(patient, no, std::stod(a),
+  std::stod(b), std::stod(c));
+      if (kind == "IP") return std::make_unique<InPatientBill>(patient, no, std::stoi(a),
+  std::stod(b), std::stod(c), 0);
+      throw BillingError("unknown bill kind '" + kind + "'");
+  }
+
+  void processOne(const std::string& line, int no, const Payer& payer)
+  {
+      Tracer t("processOne#" + std::to_string(no));
+      std::unique_ptr<Bill> bill = parseBill(line, no);
+      Settlement s = settle(*bill, payer);
+      std::cout << "    settled " << bill->type() << " total " << bill->total() << ", " <<
+  payer.name()
+                << " pays " << s.covered << ", patient pays " << s.patientPays << '\n';
+  }
+
+  int main()
+  {
+      std::cout << std::fixed << std::setprecision(2);
+      Insurance insurer("StarHealth", 30000, 10);
+      const std::vector<std::string> input = {
+          "OP Ravi 500 1200",           // valid
+          "OP Anu -500 1200",           // negative charge
+          "IP Meena 10 2500 40000",     // claim 58500 above cover 30000
+          "DC Kumar LASIK",             // unknown package code
+          "ER Latha 2000 five 800",     // text where a number is expected
+          "XR Arjun 100",               // unknown bill kind
+      };
+      int no = 200, ok = 0, failed = 0;
+      for (const std::string& line : input) {
+          std::cout << "[" << ++no << "] \"" << line << "\"\n";
+          try {
+              processOne(line, no, insurer);
+              ++ok;
+          } catch (const InvalidChargeError& e) { ++failed; std::cout << "  INVALID CHARGE :
+  " << e.what() << '\n'; }
+
+
+
+NAVEEN KUMAR S (192424104) – Assignment 5 (CO5)                                                         Page 26 of 45
+
+========== ORIGINAL PDF PAGE 27 ==========
+                                                                               Object Oriented Programming with C++ (DSA01)
+
+
+
+          catch (const ClaimError& e)            { ++failed; std::cout << "  CLAIM REJECTED :
+  " << e.what() << '\n'; }
+          catch (const UnknownPackageError& e)   { ++failed; std::cout << "  UNKNOWN PACKAGE:
+  " << e.what() << '\n'; }
+          catch (const BillingError& e)          { ++failed; std::cout << "  BILLING ERROR  :
+  " << e.what() << '\n'; }
+          catch (const std::invalid_argument& e) { ++failed; std::cout << "  BAD NUMBER     :
+  std::invalid_argument from " << e.what() << '\n'; }
+      }
+
+      std::cout << "[" << ++no << "] memory allocation failure\n";
+      try {
+          Tracer t("bigAllocation");
+          std::size_t huge = std::size_t(1) << 45;                 // 32 TiB of doubles
+  requested
+          std::unique_ptr<double[]> history(new double[huge]);
+          std::cout << "    allocated?!\n";
+      } catch (const std::bad_alloc& e) { ++failed; std::cout << "  OUT OF MEMORY  :
+  std::bad_alloc (" << e.what() << ")\n"; }
+
+      std::cout << "[" << ++no << "] unexpected exception type reaches the top level\n";
+      try {
+          Tracer t("topLevel");
+          throw 3.14;                                               // not derived from
+  std::exception
+      } catch (const std::exception& e) { std::cout << "  std::exception: " << e.what() <<
+  '\n'; }
+      catch (...) { ++failed; std::cout << "  catch(...)     : unknown error logged, program
+  continues\n"; }
+
+      std::cout << "Summary: " << ok << " bill(s) settled, " << failed << " error(s) handled,
+  program still running.\n";
+  }
+
+
+
+
+
+NAVEEN KUMAR S (192424104) – Assignment 5 (CO5)                                                         Page 27 of 45
+
+========== ORIGINAL PDF PAGE 28 ==========
+                                                                               Object Oriented Programming with C++ (DSA01)
+
+
+  Output – B2/errors.out
+
+  [201] "OP Ravi 500 1200"
+      +processOne#201
+      +parseBill#201
+      -parseBill#201
+      settled OP total 1700.00, StarHealth pays 1530.00, patient pays 170.00
+      -processOne#201
+  [202] "OP Anu -500 1200"
+      +processOne#202
+      +parseBill#202
+      -parseBill#202
+      -processOne#202
+    INVALID CHARGE : negative consultation: -500.000000
+  [203] "IP Meena 10 2500 40000"
+      +processOne#203
+      +parseBill#203
+      -parseBill#203
+      -processOne#203
+    CLAIM REJECTED : claim 58500 exceeds cover 30000
+  [204] "DC Kumar LASIK"
+      +processOne#204
+      +parseBill#204
+      -parseBill#204
+      -processOne#204
+    UNKNOWN PACKAGE: unknown day-care package: LASIK
+  [205] "ER Latha 2000 five 800"
+      +processOne#205
+      +parseBill#205
+      -parseBill#205
+      -processOne#205
+    BAD NUMBER     : std::invalid_argument from stod
+  [206] "XR Arjun 100"
+      +processOne#206
+      +parseBill#206
+      -parseBill#206
+      -processOne#206
+    BILLING ERROR  : unknown bill kind 'XR'
+  [207] memory allocation failure
+      +bigAllocation
+      -bigAllocation
+    OUT OF MEMORY  : std::bad_alloc (std::bad_alloc)
+  [208] unexpected exception type reaches the top level
+      +topLevel
+      -topLevel
+    catch(...)     : unknown error logged, program continues
+  Summary: 1 bill(s) settled, 7 error(s) handled, program still running.
+
+
+
+
+
+NAVEEN KUMAR S (192424104) – Assignment 5 (CO5)                                                         Page 28 of 45
+
+========== ORIGINAL PDF PAGE 29 ==========
+                                                                               Object Oriented Programming with C++ (DSA01)
+
+What Each Test Reveals
+
+  Test                   Exception                       What it reveals about the design
+
+ Negative            InvalidChargeError from the     Validation in constructors means an
+ consultation         constructor                         invalid bill is never created; the half-
+ (−500)                                                      built bill is cleaned up automatically
+
+ IP claim 58,500      ClaimError from              The payer, not the caller, owns the
+ above cover         Insurance::amountCovered       business rule; the bill object is released
+ 30,000                                          by unique_ptr during unwinding
+
+ Package code        UnknownPackageError             Table lookup failures are reported with
+  LASIK                                               the offending code
+
+  "five" where a     std::invalid_argument from     Library exceptions coexist with ours;
+ number is           std::stod                       the top level catches them by their
+ expected                                           standard base
+
+ Unknown bill kind   BillingError                 The general base catches errors
+  XR                                                  without a dedicated class
+
+ 32 TiB allocation     std::bad_alloc                 Out-of-memory is recoverable; the
+                                                     unique_ptr was never constructed, so
+                                                     nothing leaks
+
+  throw 3.14         caught by catch (...)          The final safety net keeps the program
+                                                   running even for non-standard
+                                                      exceptions
+
+The +name / -name tracer lines prove that every object was destroyed as each exception
+propagated – for example, in test 203 both  parseBill#203 and  processOne#203 were
+destroyed before the handler ran. The summary shows 7 errors handled and the
+program still running.
+
+Predict the Output
+
+  B2/predict.cpp
+
+  #include <iostream>
+  #include <stdexcept>
+  void validate(double amount)
+  {
+      if (amount < 0) throw std::invalid_argument("negative");
+      if (amount > 1e6) throw std::out_of_range("too large");
+      std::cout << "ok ";
+  }
+  void process(double amount)
+  {
+      try {
+          validate(amount);
+      } catch (const std::out_of_range& e) {
+          std::cout << "[log " << e.what() << "] ";
+          throw;
+      }
+  }
+  int main()
+  {
+      for (double a : {100.0, -5.0, 2e6}) {
+          try {
+
+
+NAVEEN KUMAR S (192424104) – Assignment 5 (CO5)                                                         Page 29 of 45
+
+========== ORIGINAL PDF PAGE 30 ==========
+                                                                               Object Oriented Programming with C++ (DSA01)
+
+
+
+              process(a);
+              std::cout << "done ";
+          } catch (const std::exception& e) {
+              std::cout << "caught " << e.what() << ' ';
+          }
+      }
+      std::cout << '\n';
+  }
+
+My predicted output (written before running): ok done caught negative [log too
+large] caught too large
+
+  Output – B2/predict.out
+
+  ok done caught negative [log too large] caught too large
+
+The output matches.
+
+ Amount  Thrown in validate                    Caught by           Why
+
+ 100     nothing                                 –                      prints ok , then done
+
+ −5       std::invalid_argument("negative")   main 's catch        process only handles
+                                              (const               std::out_of_range ,
+                                              std::exception&)    which
+                                                                   invalid_argument is
+                                                                    not (it is a
+                                                                   logic_error ), so it
+                                                                   passes straight through
+                                                                   process – not logged
+
+ 2×10⁶    std::out_of_range("too large")        first process (logs    out_of_range matches
+                                               [log too large] ,    the handler in process ;
+                                              then throw; ), then   throw; rethrows the
+                                               main             same object, caught by
+                                                                   main
+
+Only one exception was logged because only  out_of_range matched the handler in
+process ; done is printed only when process returns normally.
+
+Complete the Code
+
+  B2/complete.cpp
+
+  #include <iostream>
+  #include <stdexcept>
+
+  class ClaimError : public std::runtime_error {
+  public:
+      using std::runtime_error::runtime_error;
+  };
+
+  double approve(double billed, double cover)
+  {
+      // TODO 1 (completed)
+      if (billed < 0 || cover < 0) throw std::invalid_argument("negative amount");
+      if (billed > cover) throw ClaimError("exceeds cover");
+      return billed;
+  }
+
+
+
+
+NAVEEN KUMAR S (192424104) – Assignment 5 (CO5)                                                         Page 30 of 45
+
+========== ORIGINAL PDF PAGE 31 ==========
+                                                                               Object Oriented Programming with C++ (DSA01)
+
+
+
+  double settle(double billed, double cover)
+  {
+      try {
+          return approve(billed, cover);
+      } catch (const ClaimError& e) {
+          // TODO 2 (completed): log, then rethrow the SAME exception object
+          std::cout << "audit: " << e.what() << '\n';
+  #ifndef THROW_COPY
+          throw;
+  #else
+          throw e;          // experiment: throws a NEW copy whose type is the static type
+  ClaimError
+  #endif
+      }
+  }
+
+  int main()
+  {
+      double cases[][2] = {{40000, 50000}, {60000, 50000}, {-1, 50000}};
+      for (auto& c : cases) {
+          try {
+              double paid = settle(c[0], c[1]);
+              std::cout << "approved " << paid << '\n';
+          } catch (const ClaimError& e) {
+              std::cout << "claim rejected: " << e.what() << '\n';
+          } catch (const std::exception& e) {
+              std::cout << "error: " << e.what() << '\n';
+          }
+      }
+  }
+
+
+  Output – B2/complete.out
+
+  approved 40000
+  audit: exceeds cover
+  claim rejected: exceeds cover
+  error: negative amount
+
+The output matches the expected  output. Replacing  throw;  with  throw  e;   ( -
+DTHROW_COPY ) gives the same output in this program:
+
+  Output – B2/complete_throwcopy.out
+
+  approved 40000
+  audit: exceeds cover
+  claim rejected: exceeds cover
+  error: negative amount
+
+The difference is hidden here because the caught object really is a ClaimError . throw;
+rethrows the same exception object with its original dynamic type; throw e; copy-
+constructs a new exception whose type is the static type of e  ( ClaimError ). If the
+original was a more derived class, the copy is sliced:
+
+  B2/rethrow_slicing.cpp
+
+  // B2 - throw; versus throw e; when the caught object is of a MORE DERIVED type
+  #include <iostream>
+  #include <stdexcept>
+  struct ClaimError : std::runtime_error { using std::runtime_error::runtime_error; };
+  struct CoverExceeded : ClaimError {                       // a more specific claim error
+      double excess;
+      CoverExceeded(double x) : ClaimError("exceeds cover"), excess(x) {}
+  };
+  void approve() { throw CoverExceeded(10000); }
+  template <bool SAME> void settle()
+
+
+
+NAVEEN KUMAR S (192424104) – Assignment 5 (CO5)                                                         Page 31 of 45
+
+========== ORIGINAL PDF PAGE 32 ==========
+                                                                               Object Oriented Programming with C++ (DSA01)
+
+
+
+  {
+      try { approve(); }
+      catch (const ClaimError& e) {                          // static type ClaimError,
+  dynamic type CoverExceeded
+          std::cout << "  audit: " << e.what() << '\n';
+          if (SAME) throw; else throw e;
+      }
+  }
+  template <bool SAME> void run(const char* label)
+  {
+      std::cout << label << '\n';
+      try { settle<SAME>(); }
+      catch (const CoverExceeded& e) { std::cout << "  caught CoverExceeded, excess = " <<
+  e.excess << '\n'; }
+      catch (const ClaimError& e)    { std::cout << "  caught only ClaimError - the
+  CoverExceeded part was sliced off\n"; }
+  }
+  int main()
+  {
+      run<true>("with throw;");
+      run<false>("with throw e;");
+  }
+
+
+  Output – B2/rethrow_slicing.out
+
+  with throw;
+    audit: exceeds cover
+    caught CoverExceeded, excess = 10000
+  with throw e;
+    audit: exceeds cover
+    caught only ClaimError - the CoverExceeded part was sliced off
+
+With  throw  e; the specific handler for  CoverExceeded (and  its  excess  data)  is lost.
+Therefore rethrow with throw; and catch by reference.
+
+Alternative Concept and Complexity Analysis – std::optional<double>
+
+  B2/optional_alt.cpp
+
+  // B2 - Alternative: std::optional<double> instead of exceptions, 1,000,000 claims
+  #include <chrono>
+  #include <iostream>
+  #include <optional>
+  #include <stdexcept>
+  #include <vector>
+  struct ClaimError : std::runtime_error { using std::runtime_error::runtime_error; };
+
+  __attribute__((noinline)) double approveEx(double billed, double cover)
+  {
+      if (billed > cover) throw ClaimError("exceeds cover");
+      return billed;
+  }
+  __attribute__((noinline)) std::optional<double> approveOpt(double billed, double cover)
+  {
+      if (billed > cover) return std::nullopt;
+      return billed;
+  }
+  int main()
+  {
+      const int N = 1000000;
+      std::cout << "sizeof(double) = " << sizeof(double) <<
+  ", sizeof(std::optional<double>) = "
+                << sizeof(std::optional<double>) << " bytes\n";
+      std::cout << "invalid%   exceptions(ms)   optional(ms)\n";
+      for (int pct : {0, 1, 50}) {
+          std::vector<double> billed(N);
+
+
+
+NAVEEN KUMAR S (192424104) – Assignment 5 (CO5)                                                         Page 32 of 45
+
+========== ORIGINAL PDF PAGE 33 ==========
+                                                                               Object Oriented Programming with C++ (DSA01)
+
+
+
+          for (int i = 0; i < N; ++i) billed[i] = (i % 100 < pct) ? 90000 : 40000;   // >
+  50000 is invalid
+          double s1 = 0, s2 = 0; int r1 = 0, r2 = 0;
+          auto t0 = std::chrono::steady_clock::now();
+          for (int i = 0; i < N; ++i) { try { s1 += approveEx(billed[i], 50000); } catch
+  (const ClaimError&) { ++r1; } }
+          auto t1 = std::chrono::steady_clock::now();
+          for (int i = 0; i < N; ++i) { if (auto v = approveOpt(billed[i], 50000)) s2 += *v;
+  else ++r2; }
+          auto t2 = std::chrono::steady_clock::now();
+          std::cout << "  " << pct << "%\t\t" << std::chrono::duration<double, std::milli>(t1
+  - t0).count() << "\t\t"
+                    << std::chrono::duration<double, std::milli>(t2 - t1).count()
+                    << "\t(rejected " << r1 << " / " << r2 << ", sums equal " <<
+  std::boolalpha << (s1 == s2) << ")\n";
+      }
+  }
+
+
+  Output – B2/optional_alt.out
+
+  sizeof(double) = 8, sizeof(std::optional<double>) = 16 bytes
+  invalid%   exceptions(ms)   optional(ms)
+    0%        3.2542      3.30268 (rejected 0 / 0, sums equal true)
+    1%        28.2986     3.44306 (rejected 10000 / 10000, sums equal true)
+    50%       810.324     2.45234 (rejected 500000 / 500000, sums equal true)
+
+  Invalid claims     Exceptions      std::optional            Comment
+
+ 0 %        ≈ 3.3 ms    ≈ 3.3 ms              No difference: try blocks cost
+                                                          nothing on the normal path
+
+ 1 %        ≈ 28 ms    ≈ 3.4 ms                  10,000 throws cost ≈ 25 ms (≈
+                                                             2.5 µs each)
+
+ 50 %       ≈ 810 ms    ≈ 2.5 ms                  500,000 throws dominate
+
+ Extra space    none (a       16 bytes instead of 8 (flag
+ per result       double )    + padding)
+
+std::optional makes rejection an ordinary, cheap value – appropriate when rejection is
+common and expected. It cannot carry the reason (use std::variant<double, Reason> or
+std::expected in C++23 for that) and the caller can forget to check it.
+
+
+
+
+
+NAVEEN KUMAR S (192424104) – Assignment 5 (CO5)                                                         Page 33 of 45
+
+========== ORIGINAL PDF PAGE 34 ==========
+                                                                               Object Oriented Programming with C++ (DSA01)
+
+
+
+
+                                                  switch Part B – Task B3: Virtual Functions vs      vs Exceptions – The Cost
+ (8 Marks)
+
+  B3/cost.cpp
+
+  // B3 - Virtual functions vs switch vs std::variant, and the cost of exceptions
+  #include <algorithm>
+  #include <chrono>
+  #include <iomanip>
+  #include <iostream>
+  #include <memory>
+  #include <random>
+  #include <stdexcept>
+  #include <variant>
+  #include <vector>
+
+  // ---------- (a) virtual functions ----------
+  struct VBill { virtual ~VBill() = default; virtual double total() const = 0; };
+  struct VOP : VBill { double c, t;          VOP(double a, double b) : c(a), t(b)
+  {}                    double total() const override { return c + t; } };
+  struct VIP : VBill { int d; double r, s;   VIP(int a, double b, double x) : d(a), r(b),
+  s(x) {}       double total() const override { return d * r + s; } };
+  struct VDC : VBill { double price;         explicit VDC(double p) : price(p)
+  {}                      double total() const override { return price; } };
+  struct VER : VBill { double b, h, r;       VER(double x, double y, double z) : b(x), h(y),
+  r(z) {}   double total() const override { return b + h * r; } };
+
+  // ---------- (b) one struct + type field + switch ----------
+  enum Kind : int { OP, IP, DC, ER };
+  struct SBill {
+      Kind kind; double a, b, c;
+      double total() const
+      {
+          switch (kind) {
+          case OP: return a + b;
+          case IP: return int(a) * b + c;
+          case DC: return a;
+          case ER: return a + b * c;
+          }
+          return 0;
+      }
+  };
+
+  // ---------- (c) std::variant + std::visit ----------
+  struct XOP { double c, t;        double total() const { return c + t; } };
+  struct XIP { int d; double r, s; double total() const { return d * r + s; } };
+  struct XDC { double price;       double total() const { return price; } };
+  struct XER { double b, h, r;     double total() const { return b + h * r; } };
+  using XBill = std::variant<XOP, XIP, XDC, XER>;
+
+  struct Data {
+      std::vector<std::unique_ptr<VBill>> v;
+      std::vector<SBill> s;
+      std::vector<XBill> x;
+  };
+
+  Data make(std::size_t n)
+  {
+      Data d; d.v.reserve(n); d.s.reserve(n); d.x.reserve(n);
+      std::mt19937
+  rng(42);                                   // same random mix for all three versions
+      for (std::size_t i = 0; i < n; ++i) {
+          double p = 100 + rng() % 900, q = 1 + rng() % 9;
+          switch (rng() % 4) {
+          case 0: d.v.push_back(std::make_unique<VOP>(p, q * 100)); d.s.push_back({OP, p, q *
+  100, 0}); d.x.push_back(XOP{p, q * 100}); break;
+
+
+
+NAVEEN KUMAR S (192424104) – Assignment 5 (CO5)                                                         Page 34 of 45
+
+========== ORIGINAL PDF PAGE 35 ==========
+                                                                               Object Oriented Programming with C++ (DSA01)
+
+
+
+          case 1: d.v.push_back(std::make_unique<VIP>(int(q), p, 5000)); d.s.push_back({IP,
+  q, p, 5000}); d.x.push_back(XIP{int(q), p, 5000}); break;
+          case 2: d.v.push_back(std::make_unique<VDC>(p * 10)); d.s.push_back({DC, p * 10, 0,
+  0}); d.x.push_back(XDC{p * 10}); break;
+          default: d.v.push_back(std::make_unique<VER>(2000, q, p)); d.s.push_back({ER, 2000,
+  q, p}); d.x.push_back(XER{2000, q, p}); break;
+          }
+      }
+      return d;
+  }
+
+  template <class F> double best3(F f, double& result)
+  {
+      double best = 1e18;
+      for (int r = 0; r < 3; ++r) {
+          auto t0 = std::chrono::steady_clock::now();
+          result = f();
+          best = std::min(best, std::chrono::duration<double,
+  std::milli>(std::chrono::steady_clock::now() - t0).count());
+      }
+      return best;
+  }
+
+  // ---------- B3.3: validation by return code vs by exception ----------
+  enum class Status { Ok, Negative };
+  __attribute__((noinline)) Status validateCode(double amount, double& out)
+  {
+      if (amount < 0) return Status::Negative;
+      out = amount; return Status::Ok;
+  }
+  __attribute__((noinline)) double validateThrow(double amount)
+  {
+      if (amount < 0) throw std::invalid_argument("negative charge");
+      return amount;
+  }
+
+  int main()
+  {
+      std::cout << std::fixed << std::setprecision(2);
+      // B3.1 correctness on 10 bills
+      Data small = make(10);
+      std::cout << "B3.1  10 bills:\n  #   virtual      switch     variant\n";
+      double sv = 0, ss = 0, sx = 0;
+      for (int i = 0; i < 10; ++i) {
+          double a = small.v[i]->total(), b = small.s[i].total(), c = std::visit([](const
+  auto& x) { return x.total(); }, small.x[i]);
+          sv += a; ss += b; sx += c;
+          std::cout << "  " << i + 1 << std::setw(12) << a << std::setw(12) << b <<
+  std::setw(12) << c << '\n';
+      }
+      std::cout << "  sum" << std::setw(10) << sv << std::setw(12) << ss << std::setw(12) <<
+  sx
+                << "   all equal: " << std::boolalpha << (sv == ss && ss == sx) << "\n\n";
+
+      // B3.2 + variant alternative
+      std::cout << "B3.2  time to total n bills (-O2, best of 3), in ms:\n"
+                << "         n     virtual      switch     variant   same totals\n";
+      for (std::size_t n : {1000UL, 1000000UL, 10000000UL}) {
+          Data d = make(n);
+          double r1, r2, r3;
+          double t1 = best3([&] { double s = 0; for (const auto& b : d.v) s += b->total();
+  return s; }, r1);
+          double t2 = best3([&] { double s = 0; for (const auto& b : d.s) s += b.total();
+  return s; }, r2);
+          double t3 = best3([&] { double s = 0; for (const auto& b : d.x) s += std::visit([]
+  (const auto& x) { return x.total(); }, b); return s; }, r3);
+          std::cout << std::setw(10) << n << std::setprecision(3) << std::setw(12) << t1 <<
+  std::setw(12) << t2 << std::setw(12) << t3
+                    << "   " << (r1 == r2 && r2 == r3) << std::setprecision(2) << '\n';
+
+
+
+NAVEEN KUMAR S (192424104) – Assignment 5 (CO5)                                                         Page 35 of 45
+
+========== ORIGINAL PDF PAGE 36 ==========
+                                                                               Object Oriented Programming with C++ (DSA01)
+
+
+
+      }
+      std::cout << "  space per bill: virtual " << sizeof(VOP) << "-" << sizeof(VER) << " B
+  object + 8 B pointer + heap overhead;"
+                << " switch " << sizeof(SBill) << " B; variant " << sizeof(XBill) << " B\n\n";
+
+      // B3.3
+      std::cout << "B3.3  validating 1,000,000 bills (-O2), in ms:
+  \n  invalid%   return code   exception\n";
+      const int N = 1000000;
+      for (int pct : {0, 1, 50}) {
+          std::vector<double> amt(N);
+          for (int i = 0; i < N; ++i) amt[i] = (i % 100 < pct) ? -1.0 : 1500.0;
+          double s1 = 0, s2 = 0; int bad1 = 0, bad2 = 0;
+          auto t0 = std::chrono::steady_clock::now();
+          for (int i = 0; i < N; ++i) { double v; if (validateCode(amt[i], v) == Status::Ok)
+  s1 += v; else ++bad1; }
+          auto t1 = std::chrono::steady_clock::now();
+          for (int i = 0; i < N; ++i) { try { s2 += validateThrow(amt[i]); } catch (const
+  std::invalid_argument&) { ++bad2; } }
+          auto t2 = std::chrono::steady_clock::now();
+          std::cout << std::setw(8) << pct << "%" << std::setw(14) <<
+  std::chrono::duration<double, std::milli>(t1 - t0).count()
+                    << std::setw(12) << std::chrono::duration<double, std::milli>(t2 -
+  t1).count()
+                    << "   (rejected " << bad1 << "/" << bad2 << ")\n";
+      }
+  }
+
+
+  Output – B3/cost.out
+
+  B3.1  10 bills:
+    #   virtual      switch     variant
+    1      742.00      742.00      742.00
+    2     2914.00     2914.00     2914.00
+    3     6200.00     6200.00     6200.00
+    4     8130.00     8130.00     8130.00
+    5     2810.00     2810.00     2810.00
+    6     3716.00     3716.00     3716.00
+    7     9835.00     9835.00     9835.00
+    8     3152.00     3152.00     3152.00
+    9     9995.00     9995.00     9995.00
+    10     2938.00     2938.00     2938.00
+    sum  50432.00    50432.00    50432.00   all equal: true
+
+  B3.2  time to total n bills (-O2, best of 3), in ms:
+           n     virtual      switch     variant   same totals
+        1000       0.007       0.003       0.003   true
+     1000000      12.753       9.855       9.857   true
+    10000000     141.358     111.611     105.426   true
+    space per bill: virtual 24-32 B object + 8 B pointer + heap overhead; switch 32 B; variant
+  32 B
+
+  B3.3  validating 1,000,000 bills (-O2), in ms:
+    invalid%   return code   exception
+         0%          1.11        1.57   (rejected 0/0)
+         1%          1.22       16.69   (rejected 10000/10000)
+        50%          1.52      840.22   (rejected 500000/500000)
+
+B3.1 – Correctness on Small Data (2 Marks)
+
+The same 10 randomly generated  bills (fixed seed 42) were totalled with virtual
+functions, with a switch on a type field and with std::variant ; every individual total and
+the sum (50,432.00) agree.
+
+
+
+
+
+NAVEEN KUMAR S (192424104) – Assignment 5 (CO5)                                                         Page 36 of 45
+
+========== ORIGINAL PDF PAGE 37 ==========
+                                                                               Object Oriented Programming with C++ (DSA01)
+
+B3.2 – Increasing the Data Size (2 Marks)
+
+ n bills            Virtual (ms)    Switch (ms)     Variant (ms)     Virtual ÷ switch
+
+ 1,000         0.007        0.003        0.003          – (too small to measure reliably)
+
+ 1,000,000     12.8          9.9           9.9           1.29
+
+ 10,000,000    141         112         105          1.27
+
+All three grow linearly (10× bills ≈ 10× time), confirming O(n). Virtual dispatch is
+about 25–30 % slower in this micro-benchmark, mainly because each virtual bill is a
+separate heap object reached through a pointer (an extra memory access per bill and
+poorer cache locality), plus an indirect call that cannot be inlined. The  switch and
+variant versions keep all bills contiguous in one array.
+
+B3.3 – Cost of Exceptions (2 Marks)
+
+  Invalid bills   Return code (ms)   Exception (ms)   Extra cost
+
+ 0 %         1.1               1.6        ≈ none (normal path)
+
+ 1 %         1.2              16.7          10,000 throws ≈ 15 ms → ≈ 1.5 µs per throw
+
+ 50 %        1.5            840           500,000 throws ≈ 840 ms → ≈ 1.7 µs per throw
+
+Exceptions are essentially free when nothing is thrown, but each thrown exception
+costs around 1.5–1.7 µs (allocation of the exception object, table search, unwinding) –
+about a thousand times a return-code check.
+
+B3.4 – Engineering Trade-Off (2 Marks)
+
+ • Virtual functions cost a few nanoseconds per bill more than a switch. For the
+    hospital's 200,000 bills a day, totalling them through virtual calls takes about 3 ms
+   in all (≈ 0.6 ms more than with a switch ) – irrelevant – while they allow new bill
+   types without editing tested code. Use them when the set of types is open (grows
+   over time) and the objects are processed through a common interface.
+ • switch / std::variant are fastest and most compact when the set of types is closed
+   and stable, data are stored by value in large arrays, and maximum throughput
+   matters (e.g. scientific or real-time processing). std::variant additionally gives type
+    safety: std::visit fails to compile if a type is not handled.
+ • Exceptions should be used for exceptional conditions – invalid input, rejected
+   claims that need human review, allocation failure – where the normal path must stay
+    fast and errors must not be ignored. Even at an unrealistic 50 % invalid rate,
+   200,000 bills would spend only ≈ 0.17 s a day in exception handling.
+ • Return codes / std::optional are better when failure is a normal, frequent outcome
+   inside a tight loop (for example, filtering millions of candidate records).
+
+
+
+
+
+NAVEEN KUMAR S (192424104) – Assignment 5 (CO5)                                                         Page 37 of 45
+
+========== ORIGINAL PDF PAGE 38 ==========
+                                                                               Object Oriented Programming with C++ (DSA01)
+
+Alternative Concept and Complexity Analysis – std::variant and std::visit
+
+With using XBill = std::variant<XOP, XIP, XDC, XER>; each bill is stored by value in one
+vector and processed by std::visit([](const auto& b){ return b.total(); }, bill) , which
+dispatches on the stored index through a compiler-generated jump table. Measured for
+10,000,000 bills: variant 105 ms, switch 112 ms, virtual 141 ms.
+
+ Design    Space per bill (measured)                       Notes
+
+ Virtual   24–32 B object + 8 B pointer + allocator    Each type uses only its own size, but
+          overhead (≈ 16 B)                         every bill is a separate allocation
+
+ Switch  32 B ( int tag + three doubles)            Every bill pays for the largest field set
+
+ Variant  32 B = size of the largest alternative (24    Same as switch, with compile-time
+          B) + tag, rounded to alignment             checking of all cases
+
+The variant shares the switch's weakness for open extension: adding a bill type changes
+the variant type and requires recompiling everything that uses it.
+
+
+
+
+
+NAVEEN KUMAR S (192424104) – Assignment 5 (CO5)                                                         Page 38 of 45

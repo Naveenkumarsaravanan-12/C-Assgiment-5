@@ -1,0 +1,112 @@
+Assignment 5 | Part_A_-_Task_A3
+Notes extracted from the original PDF; page numbers retained.
+Code and outputs are also included in the screenshots folders.
+
+========== ORIGINAL PDF PAGE 10 ==========
+                                                                               Object Oriented Programming with C++ (DSA01)
+
+ Part A – Task A3: Design with Abstract Classes (5 Marks)
+
+A3.1 – Payer Interface (3 Marks)
+
+
+                                               «abstract» Payer
+
+
+                   + ~Payer() «virtual»
+                   + name() : string «pure virtual»
+                   + amountCovered(const Bill&) : double «pure virtual»
+
+
+
+                             Insurance
+                                                       GovernmentScheme
+   SelfPay          - company                                                                      CorporateTieUp (extension, B4)
+                        - coverLimit                                               - rates : map<type, package rate>                                                                                                                                                   - company, percent, perBillCap                        - coPayPercent
+                                                              min(rate[type], total)  covers 0                                                                                              min(total × percent, cap)                claim = total × (100 −coPay)%            throws ClaimError if type not in table
+               throws ClaimError if claim > coverLimit
+
+
+ Payer                Data                     amountCovered(bill) rule
+
+  SelfPay             –                    0 (patient pays everything)
+
+  Insurance         company, cover limit,     claim = total × (100 − co-pay)/100; if claim >
+                    co-payment %           cover limit → ClaimError
+
+  GovernmentScheme   fixed package rate for    min(package rate for the bill's type, total);
+                   each bill type          unknown type → ClaimError
+
+
+  ALGORITHM Settle(bill, payer)
+  INPUT  : a Bill and a Payer (any derived kinds)
+  OUTPUT : (covered, patientPays)
+  BEGIN
+    covered ← payer→AmountCovered(bill)      // late-bound; may THROW ClaimError
+    patientPays ← bill→Total() − covered
+    RETURN (covered, patientPays)
+  END
+
+Because both Bill and Payer are abstract, Settle works for every combination (4 bill
+kinds × 3 payers = 12 combinations) without a single type test – a double use of
+runtime polymorphism.
+
+A3.2 – Extension (2 Marks)
+
+A corporate tie-up is added by deriving a new class from Payer in a new file:
+
+  CLASS CorporateTieUp DERIVED FROM Payer
+    DATA: company, percent, perBillCap
+    FUNCTION Name() RETURNS company
+    FUNCTION AmountCovered(bill)
+    BEGIN
+        IF bill→Type() = "ER" THEN THROW ClaimError("tie-up excludes emergency bills")
+  END IF
+        RETURN MIN(bill→Total() × percent / 100, perBillCap)
+    END
+  END CLASS
+
+
+
+
+
+NAVEEN KUMAR S (192424104) – Assignment 5 (CO5)                                                         Page 10 of 45
+
+========== ORIGINAL PDF PAGE 11 ==========
+                                                                               Object Oriented Programming with C++ (DSA01)
+
+
+Settle , the bill classes and the existing payers are untouched; the new payer can be
+passed anywhere a Payer& is expected. It was implemented and tested in B4.
+
+Alternative Concept and Complexity Analysis – Function Pointers or std::function
+
+  TYPE PolicyFn = FUNCTION(bill) RETURNS amount
+  insurerPolicy ← LAMBDA(bill) CAPTURING (coverLimit = 60000, coPay = 10) … END
+  govtPolicy    ← LAMBDA(bill) CAPTURING (rates table) … END
+  covered ← insurerPolicy(bill)
+
+  Criterion               Abstract Payer class     Plain function pointer    std::function
+
+ Time per call         O(1), virtual call       O(1), indirect call      O(1), indirect call (+
+                                                                     possible small overhead)
+
+ Space per payer      object with its data   8 bytes, no data     32 bytes + heap block if
+              + vptr                                      the captured data is large
+
+ Storing cover limit,  named data           impossible – must     captured variables inside
+ co-pay, rate table    members, validated   use globals or extra   the lambda – unnamed and
+                         in the constructor     parameters          hard to inspect
+
+ Several operations   one class groups      one pointer per       one std::function per
+ (name, coverage,    them                 operation             operation
+ audit text)
+
+The class design is preferred because a payer has state and several related operations;
+std::function is attractive for a single, stateless rule.
+
+
+
+
+
+NAVEEN KUMAR S (192424104) – Assignment 5 (CO5)                                                         Page 11 of 45

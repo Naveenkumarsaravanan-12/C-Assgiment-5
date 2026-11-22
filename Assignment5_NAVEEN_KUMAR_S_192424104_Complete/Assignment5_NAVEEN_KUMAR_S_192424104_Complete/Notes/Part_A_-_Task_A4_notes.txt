@@ -1,0 +1,126 @@
+Assignment 5 | Part_A_-_Task_A4
+Notes extracted from the original PDF; page numbers retained.
+Code and outputs are also included in the screenshots folders.
+
+========== ORIGINAL PDF PAGE 12 ==========
+                                                                               Object Oriented Programming with C++ (DSA01)
+
+ Part A – Task A4: Design the Exception Strategy (4 Marks)
+
+A4.1 – The Errors and the Exception Hierarchy (2 Marks)
+
+  Error                          Detected in                            Exception class
+
+ Negative charges, days,        bill constructors (validation         InvalidChargeError
+ rates                        helper)
+
+ Claim above the cover / bill   Payer::amountCovered()           ClaimError
+ type not covered
+
+ Unknown day-care           DayCareBill constructor           UnknownPackageError
+ package code               (package lookup)
+
+ Missing patient record       patient-record lookup              PatientNotFoundError
+
+ Text where a number is      input parsing ( std::stod )          std::invalid_argument
+ expected                                                        (standard)
+
+ Memory allocation failure    any new                           std::bad_alloc (standard)
+
+
+
+                                                                                    std::exception
+
+
+
+
+
+                                                                                                                   std::bad_alloc                                                         std::runtime_error          std::logic_error                                                                                  (memory allocation failure)
+
+
+
+
+                                                                                  std::invalid_argument                                                             BillingError                                                                             (text where a number is expected – std::stod)
+
+
+
+
+  InvalidChargeError                ClaimError                UnknownPackageError        PatientNotFoundError
+  (negative charges)      (claim above cover, not covered)     (unknown day-care code)      (missing patient record)
+
+
+All billing errors derive from BillingError , which derives from std::runtime_error (and
+hence std::exception ). A caller can therefore catch a specific error ( ClaimError ), every
+billing error ( BillingError ), or anything from the standard library ( std::exception ), and
+what() always returns the reason.
+
+
+
+
+
+NAVEEN KUMAR S (192424104) – Assignment 5 (CO5)                                                         Page 12 of 45
+
+========== ORIGINAL PDF PAGE 13 ==========
+                                                                               Object Oriented Programming with C++ (DSA01)
+
+A4.2 – Specifying Exceptions (2 Marks)
+
+ Function                       May throw?   Decision
+
+  Bill constructors                  Yes        Throw InvalidChargeError /
+                                              UnknownPackageError : an invalid bill must
+                                             never exist
+
+  Payer::amountCovered , settle    Yes        Throw ClaimError : a rejection must not be
+                                              ignored
+
+  total() , type()             No in      Not marked noexcept because type() builds
+                                     practice    a std::string (allocation could fail)
+
+  name() , simple getters, swap ,     Never     Marked noexcept – they only read or move
+ move operations                              data
+
+ Destructors                  Never       Implicitly noexcept in C++11 and later
+
+Why destructors must not throw. Destructors run during stack unwinding, while
+another exception is already propagating. If a destructor throws at that moment there
+would be two active exceptions, and C++ calls std::terminate() – the program is killed
+and  bills are  lost. Destructors are therefore implicitly  noexcept ; any error during
+cleanup must be handled or logged inside the destructor.
+
+Alternative Concept and Complexity Analysis – Return Codes
+
+  ENUM Status = {OK, NEGATIVE_CHARGE, CLAIM_TOO_HIGH, UNKNOWN_PACKAGE, NO_PATIENT,
+  NO_MEMORY}
+  FUNCTION Settle(bill, payer, OUT covered) RETURNS Status
+  BEGIN
+    status ← payer.AmountCovered(bill, covered)
+    IF status ≠ OK THEN RETURN status END IF       // repeated at EVERY level of the
+  call chain
+    RETURN OK
+  END
+
+  Criterion                Return codes                             Exceptions
+
+ Normal path          a compare-and-branch after every    zero cost ("zero-cost" table-based
+                             call                                 exception handling) – measured
+                                                                    in B3.3
+
+ Error path            cheap: a return                      expensive: ≈ 1.7 µs per throw
+                                                               (B3.3)
+
+ Extra space / code     a status in every signature, out-      handlers only where errors are
+                      parameters for results, an if after    actually handled
+                       every call
+
+ Errors in              impossible to return a code – needs   natural
+ constructors /         a separate "valid" flag
+ operators
+
+ Risk                an ignored return code silently      an unhandled exception cannot
+                        continues                        be ignored
+
+
+
+
+NAVEEN KUMAR S (192424104) – Assignment 5 (CO5)                                                         Page 13 of 45

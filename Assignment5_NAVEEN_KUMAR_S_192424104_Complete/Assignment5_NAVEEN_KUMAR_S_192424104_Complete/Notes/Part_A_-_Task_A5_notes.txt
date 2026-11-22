@@ -1,0 +1,164 @@
+Assignment 5 | Part_A_-_Task_A5
+Notes extracted from the original PDF; page numbers retained.
+Code and outputs are also included in the screenshots folders.
+
+========== ORIGINAL PDF PAGE 14 ==========
+                                                                               Object Oriented Programming with C++ (DSA01)
+
+ Part A – Task A5: Design Recovery and Rethrowing (4 Marks)
+
+A5.1 – Where to Catch, Log, Rethrow and Report (2 Marks)
+
+  Level                            Responsibility     Action
+
+  Bill constructors /          Detect         throw the specific exception; never catch
+  amountCovered
+
+  settleLogged(bill,       Log and        catch (const ClaimError& e) → write the audit
+ payer) (service layer)      rethrow        log → throw; (the same object, keeping its
+                                        dynamic type)
+
+ Day-processing loop (one    Recover        catch (const BillingError&) → mark the bill
+  try per bill)                             "manual review", keep it, continue with the next
+                                                             bill
+
+  main (top level)           Report         catch (const std::exception&) and finally
+                                            catch (...) → report to the user, keep the
+                                       program running or shut down cleanly
+
+
+  ALGORITHM ProcessDay(bills, payer)
+  BEGIN
+    FOR EACH bill IN bills DO
+        TRY
+            covered ← SettleLogged(bill, payer)
+            RECORD payment(bill, covered)
+        CATCH BillingError e
+            MARK bill FOR manual review WITH reason e.What()     // the bill is never
+  lost
+        END TRY
+    END FOR
+  END
+
+  ALGORITHM SettleLogged(bill, payer)
+  BEGIN
+    TRY
+        RETURN Settle(bill, payer).covered
+    CATCH ClaimError e
+        AUDIT_LOG(bill, e.What())
+        RETHROW                                               // throw;  – same
+  exception object
+    END TRY
+  END
+
+A5.2 – No Leaks on Errors (2 Marks)
+
+Stack unwinding. When an exception  is thrown, the run-time system searches
+outward through the active function calls for a matching catch . Every function it leaves
+is exited as if by an early return : the destructors of all fully-constructed automatic
+objects in those scopes run, in reverse order of construction. If a constructor
+throws, the members and base classes already constructed are destroyed, and memory
+obtained by new for the object itself is released.
+
+RAII.  If every resource  is owned by an  object whose destructor  releases  it  –
+std::unique_ptr<Bill>  for a  bill,  std::vector  for arrays,  std::ofstream  for a log  file,
+
+
+
+NAVEEN KUMAR S (192424104) – Assignment 5 (CO5)                                                         Page 14 of 45
+
+========== ORIGINAL PDF PAGE 15 ==========
+                                                                               Object Oriented Programming with C++ (DSA01)
+
+
+std::lock_guard  for a mutex – then unwinding releases everything automatically, on
+every error path, with no catch blocks written for cleanup. B2 and B4 show this: each
+Tracer object is destroyed as the exception passes, and AddressSanitizer reports no
+leaks.
+
+Predict the Output
+
+  PartA/predict_a5.cpp
+
+  #include <iostream>
+  #include <string>
+  struct Guard {
+      std::string n;
+      explicit Guard(const std::string& s) : n(s) {}
+      ~Guard() { std::cout << '~' << n << ' '; }
+  };
+  void f()
+  {
+      Guard g("f");
+      throw 42;
+  }
+  int main()
+  {
+      try {
+          Guard m("main");
+          f();
+          std::cout << "not printed ";
+      } catch (int x) {
+          std::cout << "caught " << x;
+      } catch (...) {
+          std::cout << "other";
+      }
+      std::cout << '\n';
+  }
+
+My predicted output (written before running): ~f ~main caught 42
+
+  Output – PartA/predict_a5.out
+
+  ~f ~main caught 42
+
+The output matches. throw 42 leaves f() , destroying its local g ( ~f ); the exception then
+leaves the try block, destroying m  ( ~main ) – reverse order of construction – and only
+then is the handler entered ( caught 42 ). "not printed" never appears because control
+never returns normally from f() : the rest of the try block is skipped. catch (...) is not
+used because catch (int x) matches first.
+
+Alternative Concept and Complexity Analysis – delete in Every catch
+
+  ALGORITHM ProcessBill(line)
+  BEGIN
+    bill ← NEW ParseBill(line)
+    TRY
+        log ← NEW AuditRecord(bill)
+        TRY
+            Settle(bill, payer)
+        CATCH ANY
+            DELETE log; DELETE bill; RETHROW
+        END TRY
+        DELETE log
+    CATCH ANY
+
+
+NAVEEN KUMAR S (192424104) – Assignment 5 (CO5)                                                         Page 15 of 45
+
+========== ORIGINAL PDF PAGE 16 ==========
+                                                                               Object Oriented Programming with C++ (DSA01)
+
+
+        DELETE bill; RETHROW
+    END TRY
+    DELETE bill
+  END
+
+  Criterion                     delete in every catch                     RAII ( unique_ptr , vector )
+
+ Time                        the same – one release per resource   the same
+
+ Code size                  grows with resources × error paths   one declaration per
+                                (5 DELETE statements above for 2      resource; no cleanup
+                               resources)                         code
+
+ Places where a leak can      every new path for every live       0 – destructors run on
+ occur when a new error      resource – here 2 more               every path automatically
+ path is added
+
+
+
+
+
+NAVEEN KUMAR S (192424104) – Assignment 5 (CO5)                                                         Page 16 of 45

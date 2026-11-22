@@ -1,0 +1,343 @@
+Assignment 5 | Part_B_-_Task_B4
+Notes extracted from the original PDF; page numbers retained.
+Code and outputs are also included in the screenshots folders.
+
+========== ORIGINAL PDF PAGE 39 ==========
+                                                                               Object Oriented Programming with C++ (DSA01)
+
+ Part B – Task B4: Final Engineering Decision (5 Marks)
+
+B4.1 – A Practical Extension (2 Marks)
+
+A new bill type ( TeleconsultBill ) and a new payer ( CorporateTieUp ) were added in a new
+header; no existing file was modified:
+
+  B4/extensions.h
+
+  // B4.1 - New bill type and new payer, added in a NEW file. No existing class is modified.
+  #pragma once
+  #include "../common/payers.h"
+
+  class TeleconsultBill : public Bill {               // new bill type
+      int minutes; double perMinute, platformFee;
+  public:
+      TeleconsultBill(const std::string& p, int no, int mins, double rate, double fee)
+          : Bill(p, no), minutes(int(checked(mins, "minutes"))), perMinute(checked(rate, "per-
+  minute rate")),
+            platformFee(checked(fee, "platform fee")) {}
+      double total() const override { return minutes * perMinute + platformFee; }
+      std::string type() const override { return "TC"; }
+  };
+
+  class CorporateTieUp : public Payer {               // new payer
+      std::string company; double percent, perBillCap;
+  public:
+      CorporateTieUp(const std::string& c, double pct, double cap) : company(c),
+  percent(pct), perBillCap(cap) {}
+      std::string name() const override { return company; }
+      double amountCovered(const Bill& b) const override
+      {
+          if (b.type() == "ER") throw ClaimError(company + " tie-up excludes emergency
+  bills");
+          double share = b.total() * percent / 100;
+          return share < perBillCap ? share : perBillCap;
+      }
+  };
+
+
+  B4/regression.cpp
+
+  // B4 - Regression tests (all B1 results), tests of the extension, and error paths under
+  ASan
+  #include <cmath>
+  #include <functional>
+  #include <memory>
+  #include <vector>
+  #include "extensions.h"
+
+  int passed = 0, failed = 0;
+  void expect(const std::string& what, double got, double want)
+  {
+      bool ok = std::fabs(got - want) < 1e-6;
+      (ok ? passed : failed)++;
+      std::cout << (ok ? "  PASS  " : "  FAIL  ") << std::left << std::setw(42) << what <<
+  std::right
+                << std::setw(10) << got << " (expected " << want << ")\n";
+  }
+  void expectThrow(const std::string& what, const std::function<void()>& f, const
+  std::string& kind)
+  {
+      try { f(); ++failed; std::cout << "  FAIL  " << what << ": no exception\n"; }
+      catch (const BillingError& e) { ++passed; std::cout << "  PASS  " << std::left <<
+  std::setw(42) << what << std::right << " threw " << kind << ": " << e.what() << '\n'; }
+  }
+
+
+NAVEEN KUMAR S (192424104) – Assignment 5 (CO5)                                                         Page 39 of 45
+
+========== ORIGINAL PDF PAGE 40 ==========
+                                                                               Object Oriented Programming with C++ (DSA01)
+
+
+
+
+  // A5.1 design: settle() logs and RETHROWS; the day loop reports and continues
+  double settleLogged(const Bill& b, const Payer& p)
+  {
+      try { return settle(b, p).covered; }
+      catch (const ClaimError& e) { std::cout << "    [audit log] bill " << b.name() << ": "
+  << e.what() << '\n'; throw; }
+  }
+
+  int main()
+  {
+      std::cout << std::fixed << std::setprecision(2);
+      std::cout << "Earlier tests (B1.1 table):\n";
+      OutPatientBill op("Ravi", 101, 500, 1200);
+      InPatientBill ip("Meena", 102, 3, 2500, 40000, 6500);
+      DayCareBill dc("Kumar", 103, "CATARACT");
+      EmergencyBill er("Latha", 104, 2000, 5, 800);
+      SelfPay self; Insurance ins("StarHealth", 60000, 10); GovernmentScheme gov;
+      expect("OP total", op.total(), 1700);         expect("IP total", ip.total(), 54000);
+      expect("DC total", dc.total(), 25000);        expect("ER total", er.total(), 6000);
+      expect("Self covers OP", settle(op, self).covered, 0);
+      expect("Insurance covers IP (90%)", settle(ip, ins).covered, 48600);
+      expect("Govt covers DC (package 15000)", settle(dc, gov).covered, 15000);
+      expect("Govt covers ER (package 5000)", settle(er, gov).covered, 5000);
+
+      std::cout << "Extension (new bill type TC, new payer CorporateTieUp):\n";
+      TeleconsultBill tc("Nisha", 105, 20, 30, 99);
+      CorporateTieUp corp("InfoTech Ltd", 80, 20000);
+      expect("TC total 20 min x 30 + 99", tc.total(), 699);
+      expect("Corporate covers TC (80%)", settle(tc, corp).covered, 559.2);
+      expect("Corporate covers IP (cap 20000)", settle(ip, corp).covered, 20000);
+      expect("Insurance covers TC (90%)", settle(tc, ins).covered, 629.1);
+      expectThrow("Govt scheme on TC (not in its table)", [&] { settle(tc, gov); },
+  "ClaimError");
+      expectThrow("Corporate on ER (excluded)", [&] { settle(er, corp); }, "ClaimError");
+
+      std::cout << "Error paths (exceptions thrown and caught; objects must be released):\n";
+      expectThrow("negative consultation", [] { OutPatientBill b("X", 1, -1, 0); },
+  "InvalidChargeError");
+      expectThrow("unknown package", [] { auto b = std::make_unique<DayCareBill>("Y", 2,
+  "LASIK"); }, "UnknownPackageError");
+      expectThrow("negative tele minutes", [] { TeleconsultBill b("Z", 3, -5, 30, 99); },
+  "InvalidChargeError");
+
+      std::cout << "Processing a day's bills through Bill* (logged and rethrown claim errors):
+  \n";
+      std::vector<std::unique_ptr<Bill>> day;
+      day.push_back(std::make_unique<InPatientBill>("Arun", 201, 12, 3000, 30000,
+  4000));     // 70000 -> 63000 > cover
+      day.push_back(std::make_unique<TeleconsultBill>("Bala", 202, 15, 30, 99));
+      day.push_back(std::make_unique<OutPatientBill>("Chitra", 203, 500, 800));
+      double covered = 0; int rejected = 0;
+      for (const auto& b : day) {
+          try { covered += settleLogged(*b, ins); }
+          catch (const BillingError&) { ++rejected; std::cout << "    [report] " << b->type()
+  << " bill of " << b->name() << " rejected - kept for manual review\n"; }
+      }
+      expect("insurer total for the day (494.10 + 1170)", covered, 494.1 + 1170);
+      std::cout << "Result: " << passed << " passed, " << failed << " failed; " << rejected
+  << " bill(s) sent to manual review, none lost\n";
+      return failed;
+  }
+
+
+
+
+
+NAVEEN KUMAR S (192424104) – Assignment 5 (CO5)                                                         Page 40 of 45
+
+========== ORIGINAL PDF PAGE 41 ==========
+                                                                               Object Oriented Programming with C++ (DSA01)
+
+B4.2 – Resource Safety (1 Mark)
+
+The  regression  program,  which  throws  and  catches   six  exceptions  (three
+InvalidChargeError / UnknownPackageError from constructors, three ClaimError s including a
+logged-and-rethrown one), was run under AddressSanitizer:
+
+  Output – B4/regression.out
+
+  Earlier tests (B1.1 table):
+    PASS  OP total                                     1700.00 (expected 1700.00)
+    PASS  IP total                                    54000.00 (expected 54000.00)
+    PASS  DC total                                    25000.00 (expected 25000.00)
+    PASS  ER total                                     6000.00 (expected 6000.00)
+    PASS  Self covers OP                                  0.00 (expected 0.00)
+    PASS  Insurance covers IP (90%)                   48600.00 (expected 48600.00)
+    PASS  Govt covers DC (package 15000)              15000.00 (expected 15000.00)
+    PASS  Govt covers ER (package 5000)                5000.00 (expected 5000.00)
+  Extension (new bill type TC, new payer CorporateTieUp):
+    PASS  TC total 20 min x 30 + 99                     699.00 (expected 699.00)
+    PASS  Corporate covers TC (80%)                     559.20 (expected 559.20)
+    PASS  Corporate covers IP (cap 20000)             20000.00 (expected 20000.00)
+    PASS  Insurance covers TC (90%)                     629.10 (expected 629.10)
+    PASS  Govt scheme on TC (not in its table)       threw ClaimError: bill type TC not covered
+  by the scheme
+    PASS  Corporate on ER (excluded)                 threw ClaimError: InfoTech Ltd tie-up
+  excludes emergency bills
+  Error paths (exceptions thrown and caught; objects must be released):
+    PASS  negative consultation                      threw InvalidChargeError: negative
+  consultation: -1.000000
+    PASS  unknown package                            threw UnknownPackageError: unknown day-
+  care package: LASIK
+    PASS  negative tele minutes                      threw InvalidChargeError: negative
+  minutes: -5.000000
+  Processing a day's bills through Bill* (logged and rethrown claim errors):
+      [audit log] bill Arun: claim 63000 exceeds cover 60000
+      [report] IP bill of Arun rejected - kept for manual review
+    PASS  insurer total for the day (494.10 + 1170)    1664.10 (expected 1664.10)
+  Result: 18 passed, 0 failed; 1 bill(s) sent to manual review, none lost
+  [exit status 0 – AddressSanitizer/LeakSanitizer reported no errors]
+
+All 18 tests pass – the eight earlier B1 results unchanged, the new bill type and payer
+correct (20 × 30 + 99 = 699; 80 % = 559.20; IP capped at 20,000; 15 × 30 + 99 = 549
+× 0.9 = 494.10), and every error path handled. The  final line confirms a clean
+sanitizer report: no leaks and no invalid memory accesses, even though objects were
+being constructed and destroyed while exceptions propagated. The rejected in-patient
+bill was logged, rethrown and kept for manual review – no bill was lost.
+
+B4.3 – Production Decision (2 Marks)
+
+Decision: the polymorphic design with exceptions is suitable for the hospital
+group, and is recommended.
+
+
+
+
+
+NAVEEN KUMAR S (192424104) – Assignment 5 (CO5)                                                         Page 41 of 45
+
+========== ORIGINAL PDF PAGE 42 ==========
+                                                                               Object Oriented Programming with C++ (DSA01)
+
+
+  Factor              Evidence                                     Assessment
+
+ Throughput      10 million bills totalled in 141 ms (B3.2);     Capacity exceeds demand by a
+                   the group needs 200,000 bills a day           factor of more than 10,000
+
+ Error handling   ≈ 1.7 µs per exception (B3.3)              Even if 10 % of 200,000 bills
+ cost                                                  were rejected: ≈ 0.03 s a day
+
+ Extension effort  One new class per bill type or payer; zero    Two new bill types and three
+                     edits to existing classes; all old tests still    new payers a year are low-risk
+                   pass (B4.1)                              changes
+
+  Reliability         Invalid bills cannot be constructed;         Meets "never lose a bill
+                     rejections cannot be ignored; RAII + virtual   because of an error"
+                    destructors give clean ASan reports
+
+ Where it would     If rates change weekly, recompiling for      Combine with configuration-
+ not be ideal       every tariff change is slow                   driven rates (below)
+
+The 25 % dispatch overhead measured against a switch  is real but immaterial at this
+scale, whereas the extensibility and safety benefits are exactly what a growing 15-
+hospital group needs. Rates and package prices should be read from configuration so
+that tariff changes do not require new code, while genuinely new kinds of bills and
+payers are added as new classes.
+
+Alternative Concept and Complexity Analysis – Plug-ins / Configuration Rules
+
+  CONFIG FILE (one entry per bill type or payer):
+     billType TELECONSULT : total = minutes × 30 + 99
+     payer    INFOTECH    : covered = MIN(total × 0.80, 20000); exclude ER
+
+  ALGORITHM TotalFromRules(bill, rules)
+  BEGIN
+    rule ← rules.Lookup(bill.type)                 // hash lookup, O(1) average
+    IF rule = NULL THEN THROW UnknownPackageError END IF
+    RETURN Evaluate(rule.expression, bill.fields)  // interpret the expression: O(size
+  of rule)
+  END
+
+
+
+
+
+NAVEEN KUMAR S (192424104) – Assignment 5 (CO5)                                                         Page 42 of 45
+
+========== ORIGINAL PDF PAGE 43 ==========
+                                                                               Object Oriented Programming with C++ (DSA01)
+
+
+  Criterion            New C++ classes               Configuration / plug-in rules
+
+ Time per bill         one virtual call              rule lookup + expression interpretation –
+                      (nanoseconds)               typically 10–100× slower, still far within
+                                                   capacity
+
+ Space              code only                  the rule tables in memory (small: kilobytes)
+
+ Effort for a new        edit, compile, test, deploy   edit a file – no deployment
+ rate or payer
+ percentage
+
+ Effort for a          one class              may need new features in the rule language
+ genuinely new kind
+ of logic
+
+ Risk                 compiler type-checks        rules are checked only at run time – a typo
+                      every rule; regression      can mis-bill patients, so validation and
+                          tests run                  approval of rule files are essential
+
+The best practical solution is a hybrid: C++ classes for the kinds of bills and payers
+(behaviour), configuration for the numbers (rates, limits, percentages).
+
+
+
+
+
+NAVEEN KUMAR S (192424104) – Assignment 5 (CO5)                                                         Page 43 of 45
+
+========== ORIGINAL PDF PAGE 44 ==========
+                                                                               Object Oriented Programming with C++ (DSA01)
+
+ Overall Conclusion
+
+The  hospital  billing  system  demonstrates  the  two  pillars  of  CO5.  Runtime
+polymorphism – abstract Bill and Payer classes, virtual and pure virtual functions,
+virtual destructors and late binding through vtables – lets the program settle every
+combination of bill and payer through one interface and accept new bill types and
+payers without modifying tested code. Exception handling – a hierarchy of error
+classes, throwing from constructors and business rules, catching at the right level,
+logging and rethrowing with  throw; , and RAII for automatic cleanup during stack
+unwinding – ensures that invalid bills are rejected with clear reasons and that no bill or
+resource is lost. The measurements show that the costs of both mechanisms are small
+and predictable at the hospital group's scale, which supports the final decision to adopt
+the polymorphic, exception-based design.
+
+
+
+
+
+NAVEEN KUMAR S (192424104) – Assignment 5 (CO5)                                                         Page 44 of 45
+
+========== ORIGINAL PDF PAGE 45 ==========
+                                                                               Object Oriented Programming with C++ (DSA01)
+
+ References
+
+ 1. Balagurusamy, E. Object Oriented Programming with C++, 8th ed. McGraw Hill
+   Education, 2020 – chapters on virtual functions, polymorphism and exception
+   handling.
+ 2. Stroustrup, B. The C++ Programming Language, 4th ed. Addison-Wesley, 2013 –
+   chapters 13 (Exception Handling), 20 (Derived Classes) and 22 (Run-Time Type
+   Information).
+ 3. Sutter, H. and Alexandrescu, A. C++ Coding Standards. Addison-Wesley, 2004 –
+   items on virtual destructors, exception safety and error handling.
+ 4. ISO/IEC 14882:2017, Programming Languages – C++, §13.3 Virtual functions, §13.4
+   Abstract classes, §18 Exception handling, §23.7 Variants.
+ 5. cppreference.com – "virtual function specifier", "abstract class", "throw expression",
+    "try-block", "noexcept specifier", "std::optional", "std::variant", "std::visit".
+ 6. Itanium C++ ABI – virtual table layout and table-based ("zero-cost") exception
+   handling (itanium-cxx-abi.github.io).
+ 7. AddressSanitizer documentation, github.com/google/sanitizers.
+
+
+
+
+
+NAVEEN KUMAR S (192424104) – Assignment 5 (CO5)                                                         Page 45 of 45

@@ -1,0 +1,197 @@
+Assignment 5 | Part_A_-_Task_A1
+Notes extracted from the original PDF; page numbers retained.
+Code and outputs are also included in the screenshots folders.
+
+========== ORIGINAL PDF PAGE 2 ==========
+                                                                               Object Oriented Programming with C++ (DSA01)
+
+Contents
+
+Introduction and Execution Environment ................................................................................................ 3
+Part A – Task A1: Design the Polymorphic Bill Hierarchy (7 Marks) ......................................................... 4
+Part A – Task A2: Understand Runtime Binding (5 Marks) ....................................................................... 6
+Part A – Task A3: Design with Abstract Classes (5 Marks) ....................................................................... 10
+Part A – Task A4: Design the Exception Strategy (4 Marks)..................................................................... 12
+Part A – Task A5: Design Recovery and Rethrowing (4 Marks) ............................................................... 14
+Part B – Task B1: Implement and Validate the Polymorphic Billing (7 Marks) ...................................... 17
+Part B – Task B2: Engineer Error Conditions (5 Marks) .......................................................................... 26
+Part B – Task B3: Virtual Functions vs switch vs Exceptions – The Cost (8 Marks) .............................. 34
+Part B – Task B4: Final Engineering Decision (5 Marks) ......................................................................... 39
+Overall Conclusion .................................................................................................................................. 44
+References ............................................................................................................................................... 45
+
+
+
+
+
+NAVEEN KUMAR S (192424104) – Assignment 5 (CO5)                                                          Page 2 of 45
+
+========== ORIGINAL PDF PAGE 3 ==========
+                                                                               Object Oriented Programming with C++ (DSA01)
+
+ Introduction and Execution Environment
+
+This  report  answers  Assignment  5  (CO5):  reliable  software  with  runtime
+polymorphism and exceptions, using the case study of a multi-speciality hospital's
+billing and  insurance-claims system.  It  follows the progression required by the
+assignment:
+
+  Abstract → Specialise → Bind at Run Time → Detect Errors → Throw → Catch → Recover →
+  Measure → Decide
+
+Part A gives the design as UML, vtable and exception-hierarchy diagrams, reasoning
+and pseudocode  in the SIMATS standard format (no C++  is used  in place  of
+pseudocode; the only programs in Part A are the Predict the Output programs that the
+assignment supplies). Part B gives the implementation and the experiments.
+
+ Item                 Detail
+
+ Compiler      g++ 13.3.0, C++17, Linux x86-64
+
+ Compile          g++ -std=c++17 -Wall -Wextra ( -O2 for timings, -g -fsanitize=address for
+ command         sanitizer runs)
+
+ Shared code      common/errors.h (exception classes), common/bills.h (bill hierarchy),
+                   common/payers.h (payer hierarchy)
+
+ Repository        PartA , B1 … B4 , common ; every folder has a run.sh and the captured .out
+ layout               files
+
+All outputs, compiler messages, sanitizer reports and timings were captured from
+actual runs. Sanitizer reports are shortened to their informative lines, with addresses
+shown as 0x… .
+
+
+
+
+
+NAVEEN KUMAR S (192424104) – Assignment 5 (CO5)                                                          Page 3 of 45
+
+========== ORIGINAL PDF PAGE 4 ==========
+                                                                               Object Oriented Programming with C++ (DSA01)
+
+ Part A – Task A1: Design the Polymorphic Bill Hierarchy (7 Marks)
+
+A1.1 – The Common Interface (2 Marks)
+
+ Common to all bills        Kind                       Reason
+
+  patient (name/ID),     data                     Every bill belongs to a patient and needs a
+  billNo                                    number for audit
+
+  total()                operation – pure virtual   Every bill has a total, but each kind
+                                             computes it differently
+
+  type()                 operation – pure virtual   Short code (OP/IP/DC/ER) used by payers
+                                            and reports
+
+  print()                operation – virtual with   Same layout for most bills; a bill may
+                       default                  extend it
+
+  name()                 operation – non-virtual,     Identical for all bills
+                        noexcept
+
+ destructor              virtual                        Bills are deleted through Bill* (see A2.3)
+
+Data specific to each kind: out-patient – consultation and test charges; in-patient – days,
+room rate per day, procedures, medicines; day-care – package code and package price;
+emergency – base charge, hours and hourly rate.
+
+A1.2 – The Hierarchy (3 Marks)
+
+
+                                                       «abstract» Bill
+
+                              # patient : string
+                              # billNo : int
+
+                              + Bill(patient, billNo)
+                              + ~Bill() «virtual»
+                              + total() : double «pure virtual»
+                              + type() : string «pure virtual»
+                              + print(os) «virtual»
+                              + name() : string noexcept
+
+
+
+                                               InPatientBill                    DayCareBill         OutPatientBill                                                                               EmergencyBill
+                                                  - days, perDay                         - package : string   - consultation, tests                                                                                                                - base, hours, perHour                                                  - procedures, medicines            - price : double
+ + total() «override»                                                + total() «override»                      + total() «override»        + total() «override» + type() «override» = "OP"                                            + type() «override» = "ER"                      + type() «override» = "IP"    + type() «override» = "DC"
+
+
+Bill is an abstract base class (it has pure virtual functions, so no Bill object can be
+created). Each derived class overrides  total() and  type() ;  print()  is virtual but
+inherited unchanged. All inheritance is public, single and hierarchical.
+
+
+
+
+
+NAVEEN KUMAR S (192424104) – Assignment 5 (CO5)                                                          Page 4 of 45
+
+========== ORIGINAL PDF PAGE 5 ==========
+                                                                               Object Oriented Programming with C++ (DSA01)
+
+
+ Function        In Bill                         In each derived class
+
+  total()      pure virtual ( = 0 )          overridden
+
+  type()       pure virtual                overridden
+
+  print()       virtual (has a body)         inherited
+
+  ~Bill()       virtual                        implicitly overridden by each destructor
+
+  name()        non-virtual                  inherited
+
+A1.3 – Processing All Bills Together (2 Marks)
+
+  ALGORITHM DayTotal(bills, n)
+  INPUT  : bills[0..n−1], an array of pointers to Bill objects of any kind
+  OUTPUT : sum of the totals of all bills
+  BEGIN
+    sum ← 0
+    FOR i ← 0 TO n − 1 DO
+        sum ← sum + bills[i]→Total()        // late-bound call: the object's own Total()
+    END FOR
+    RETURN sum
+  END
+
+The loop never tests which kind of bill it has; adding a new bill kind requires no change
+to this algorithm.
+
+Alternative Concept and Complexity Analysis – One Bill Structure with a Type Field
+
+  STRUCTURE Bill: kind ∈ {OP, IP, DC, ER}, patient, a, b, c, d     // union of all
+  fields
+
+  ALGORITHM Total(bill)
+  BEGIN
+    CASE bill.kind OF
+       OP : RETURN bill.a + bill.b
+       IP : RETURN bill.a × bill.b + bill.c + bill.d
+       DC : RETURN bill.a
+       ER : RETURN bill.a + bill.b × bill.c
+    END CASE
+  END
+
+  Criterion              Type field + switch                                    Abstract base + virtual
+                                                                                 functions
+
+ Time to total n bills   O(n) – one switch per bill                        O(n) – one virtual call
+                                                                   per bill
+
+ Space per bill          size of the largest set of fields + tag, for every    only that bill's fields +
+                           bill                                       one 8-byte vptr
+
+ Code changed for a   the enum, the structure, Total() and every     none – one new
+ new bill type         other switch (print, validation, payer rules)      derived class
+
+Measured times for both designs are in Task B3.
+
+
+
+
+
+NAVEEN KUMAR S (192424104) – Assignment 5 (CO5)                                                          Page 5 of 45

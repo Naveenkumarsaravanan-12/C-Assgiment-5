@@ -1,0 +1,220 @@
+Assignment 5 | Part_A_-_Task_A2
+Notes extracted from the original PDF; page numbers retained.
+Code and outputs are also included in the screenshots folders.
+
+========== ORIGINAL PDF PAGE 6 ==========
+                                                                               Object Oriented Programming with C++ (DSA01)
+
+ Part A – Task A2: Understand Runtime Binding (5 Marks)
+
+A2.1 – Early and Late Binding (2 Marks)
+
+Binding is the association of a function call with the function body that will execute.
+
+ • Early (compile-time, static) binding: the compiler chooses the function from the
+   static type of the expression. For Bill* b , a call to a non-virtual function such as b-
+   >name() is bound to Bill::name() at compile time, whatever object b actually points
+    to. Calls through objects (not pointers/references) and calls to non-virtual functions
+   are bound early; they can be inlined.
+ • Late (run-time, dynamic) binding: for a virtual function called through a pointer
+   or reference, the choice is made at run time from the dynamic type of the object.
+   For Bill* b = new OutPatientBill(…) , the call b->total() executes
+    OutPatientBill::total() ; if b later points to an InPatientBill , the same line executes
+    InPatientBill::total() .
+
+A2.2 – The Virtual Table (2 Marks)
+
+
+                                                                vtable for InPatientBill
+                                                                    ~InPatientBill()
+                                                              total →InPatientBill::total
+                                                               type →InPatientBill::type
+                                                                  print →Bill::print
+
+
+                                                                    vtable for Bill
+                                                                        ~Bill()
+                                                               total →__cxa_pure_virtual
+                                                               type →__cxa_pure_virtual
+                                                                  print →Bill::print
+                         OutPatientBill object
+                                  vptr                2. load vptr     vtable for OutPatientBill
+                1. load object          patient                            ~OutPatientBill()
+ Bill* b                                                                                                                    3. call slot 'total'       OutPatientBill::total()                                 billNo                      total →OutPatientBill::total                                                                                                             { return consultation + tests; }
+                              consultation                    type →OutPatientBill::type
+                                 tests                            print →Bill::print
+
+
+Each class with virtual functions has one vtable: an array of function addresses, one
+slot per virtual function, in a fixed order shared by the whole hierarchy. Every object of
+such a class contains a hidden vptr, set by the constructor, that points to its class's
+vtable. For Bill the total and type slots point to the run-time "pure virtual called"
+handler; derived classes fill those slots with their own functions, while the print slot
+still points to Bill::print because no class overrides it.
+
+A call b->total() is compiled as: (1) load the object address from b ; (2) load the vptr
+from the object; (3) load the function address from the total slot (a fixed offset) and
+call it, passing b as this . The cost is two extra memory loads and an indirect call –
+constant time.
+
+A2.3 – Virtual Destructors (1 Mark)
+
+Bills are created as derived objects but stored and deleted through Bill* . If ~Bill() is
+not virtual,  delete  b binds early to  ~Bill() : the derived destructor never runs (its
+members –  strings, vectors, buffers – are never released), and the behaviour  is
+
+
+
+NAVEEN KUMAR S (192424104) – Assignment 5 (CO5)                                                          Page 6 of 45
+
+========== ORIGINAL PDF PAGE 7 ==========
+                                                                               Object Oriented Programming with C++ (DSA01)
+
+
+undefined by the C++ standard. Making ~Bill()  virtual puts the destructor in the
+vtable, so delete b  calls the most-derived destructor first, which then automatically
+calls ~Bill() .
+
+Predict the Output
+
+  PartA/predict_a2.cpp
+
+  #include <iostream>
+  struct Bill {
+      virtual ~Bill() { std::cout << "~Bill "; }
+      virtual double total() const = 0;
+      void show() const { std::cout << total() << ' '; }
+  };
+
+  struct OPBill : Bill {
+      ~OPBill() override { std::cout << "~OPBill "; }
+      double total() const override { return 500; }
+  };
+
+  int main()
+  {
+      Bill* b = new OPBill;
+      b->show();
+      delete b;
+      std::cout << '\n';
+  }
+
+My predicted output (written before running): 500 ~OPBill ~Bill
+
+  Output – PartA/predict_a2.out
+
+  500 ~OPBill ~Bill
+
+The output matches. How show() , a non-virtual function, reached OPBill::total() :
+show() itself is bound early to Bill::show() , but inside it the call total() means this-
+>total() . Because total is virtual and this points to an OPBill , that inner call is late-
+bound through the vptr to OPBill::total() , which returns 500. delete b uses the virtual
+destructor, so ~OPBill runs first and then ~Bill .
+
+Removing virtual from ~Bill . Predicted: the given program will not even compile,
+because ~OPBill()  is marked override and there is no longer a virtual destructor to
+override:
+
+  Output – PartA/predict_a2_novirtual.out
+
+  predict_a2_novirtual.cpp:9:5: error: 'OPBill::~OPBill()' marked 'override', but does not
+  override
+      9 |     ~OPBill() override { std::cout << "~OPBill "; }
+        |     ^
+  predict_a2_novirtual.cpp: In function 'int main()':
+  predict_a2_novirtual.cpp:17:5: warning: deleting object of abstract class type 'Bill' which
+  has non-virtual destructor will cause undefined behavior [-Wdelete-non-virtual-dtor]
+     17 |     delete b;
+        |     ^~~~~~~~
+
+Removing  override  as  well  (file  experiment_a2.cpp ,  built  with  -DNO_VIRTUAL_DTOR ),
+predicted output: 500 ~Bill – the derived destructor is skipped. g++ warns, and the run
+confirms the prediction:
+
+
+
+
+NAVEEN KUMAR S (192424104) – Assignment 5 (CO5)                                                          Page 7 of 45
+
+========== ORIGINAL PDF PAGE 8 ==========
+                                                                               Object Oriented Programming with C++ (DSA01)
+
+
+  Output – PartA/predict_a2_nv_compile.out
+
+  experiment_a2.cpp: In function 'int main()':
+  experiment_a2.cpp:23:5: warning: deleting object of abstract class type 'Bill' which has non-
+  virtual destructor will cause undefined behavior [-Wdelete-non-virtual-dtor]
+     23 |     delete b;
+        |     ^~~~~~~~
+
+
+  Output – PartA/predict_a2_nv.out
+
+  500 ~Bill
+  [exit status 0 – AddressSanitizer/LeakSanitizer reported no errors]
+
+AddressSanitizer reports nothing here only because OPBill has no data of its own, so
+the derived and base objects have the same size (8 bytes – just the vptr). This shows
+that a clean run does not prove absence of undefined behaviour. As soon as the bill
+holds real data (a patient-name string), the sanitizer detects the error:
+
+  Output – PartA/predict_a2_leaky.out
+
+  500 ~Bill
+  ==3296==ERROR: AddressSanitizer: new-delete-type-mismatch on 0x… in thread T0:
+    size of the allocated type:   40 bytes;
+    size of the deallocated type: 8 bytes.
+      #0 0x… in operator delete(void*, unsigned long) asan_new_delete.cpp:164
+      #1 0x… in main PartA/predict_a2_leaky.cpp:18
+  0x… is located 0 bytes inside of 40-byte region [0x…,0x…)
+  allocated by thread T0 here:
+      #0 0x… in operator new(unsigned long) asan_new_delete.cpp:95
+      #1 0x… in main PartA/predict_a2_leaky.cpp:16
+  SUMMARY: AddressSanitizer: new-delete-type-mismatch asan_new_delete.cpp:164 in operator
+  delete(void*, unsigned long)
+  ==3296==HINT: if you don't care about these errors you may set
+  ASAN_OPTIONS=new_delete_type_mismatch=0
+
+Alternative Concept and Complexity Analysis – dynamic_cast instead of virtual
+
+  ALGORITHM Total(b)                                   // total() not virtual
+  BEGIN
+    IF DynamicCast<OutPatientBill>(b) ≠ NULL THEN RETURN that.consultation + that.tests
+  END IF
+    IF DynamicCast<InPatientBill>(b)  ≠ NULL THEN RETURN that.days × that.perDay + … END
+  IF
+    IF DynamicCast<DayCareBill>(b)    ≠ NULL THEN RETURN that.price END IF
+    IF DynamicCast<EmergencyBill>(b)  ≠ NULL THEN RETURN that.base + that.hours ×
+  that.rate END IF
+    THROW BillingError("unknown bill type")
+  END
+
+  Criterion          Virtual call           Chain of dynamic_cast
+
+ Time per bill    O(1): one           O(k): up to k casts for k bill types, each cast walking run-
+                   indirect call        time type information
+
+ Space per      one 8-byte vptr      still one vptr – dynamic_cast requires a polymorphic
+ object                                class
+
+ New bill type   new class only    new class and a new branch in every such function
+
+
+
+
+
+NAVEEN KUMAR S (192424104) – Assignment 5 (CO5)                                                          Page 8 of 45
+
+========== ORIGINAL PDF PAGE 9 ==========
+                                                                               Object Oriented Programming with C++ (DSA01)
+
+
+dynamic_cast therefore costs more time, saves no space and spreads type knowledge
+through the program.
+
+
+
+
+
+NAVEEN KUMAR S (192424104) – Assignment 5 (CO5)                                                          Page 9 of 45

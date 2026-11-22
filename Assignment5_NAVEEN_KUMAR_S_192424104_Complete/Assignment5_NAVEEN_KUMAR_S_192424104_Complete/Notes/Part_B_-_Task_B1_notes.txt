@@ -1,0 +1,629 @@
+Assignment 5 | Part_B_-_Task_B1
+Notes extracted from the original PDF; page numbers retained.
+Code and outputs are also included in the screenshots folders.
+
+========== ORIGINAL PDF PAGE 17 ==========
+                                                                               Object Oriented Programming with C++ (DSA01)
+
+ Part B – Task B1: Implement and Validate the Polymorphic Billing (7
+ Marks)
+
+B1.1 – Validate the Implementation (2 Marks)
+
+  common/errors.h
+
+  // Exception hierarchy for the hospital billing system (Task A4)
+  #pragma once
+  #include <stdexcept>
+  #include <string>
+
+  class BillingError : public std::runtime_error {             // root of all billing errors
+  public:
+      using std::runtime_error::runtime_error;
+  };
+  class InvalidChargeError : public BillingError {             // negative or impossible
+  amounts
+  public:
+      using BillingError::BillingError;
+  };
+  class ClaimError : public BillingError {                     // payer refuses the claim
+  public:
+      using BillingError::BillingError;
+  };
+  class UnknownPackageError : public BillingError
+  {            // day-care package code not in the table
+  public:
+      using BillingError::BillingError;
+  };
+  class PatientNotFoundError : public BillingError {           // no record for the patient ID
+  public:
+      using BillingError::BillingError;
+  };
+  // std::bad_alloc (memory) and std::invalid_argument (bad numeric text from std::stod)
+  // come from the standard library and are handled at the top level.
+
+
+  common/bills.h
+
+  // Polymorphic bill hierarchy (Tasks A1, B1)
+  #pragma once
+  #include <iomanip>
+  #include <iostream>
+  #include <map>
+  #include <string>
+  #include "errors.h"
+
+  #ifdef NO_VIRTUAL_DTOR          // experiment B1.4
+  #define BILL_DTOR_VIRTUAL
+  #else
+  #define BILL_DTOR_VIRTUAL virtual
+  #endif
+
+  inline double checked(double amount, const char* what)       // validation used by every
+  constructor
+  {
+      if (amount < 0) throw InvalidChargeError(std::string("negative ") + what + ": " +
+  std::to_string(amount));
+      return amount;
+  }
+
+  class Bill {                                                  // ABSTRACT base
+  protected:
+      std::string patient;
+
+
+
+NAVEEN KUMAR S (192424104) – Assignment 5 (CO5)                                                         Page 17 of 45
+
+========== ORIGINAL PDF PAGE 18 ==========
+                                                                               Object Oriented Programming with C++ (DSA01)
+
+
+
+      int billNo;
+  public:
+      Bill(const std::string& p, int no) : patient(p), billNo(no) {}
+      BILL_DTOR_VIRTUAL ~Bill() = default;
+      Bill(const Bill&) = delete;                                // polymorphic: never copied
+  (no slicing)
+      Bill& operator=(const Bill&) = delete;
+
+      virtual double total() const = 0;                          // pure virtual
+      virtual std::string type() const = 0;                      // pure virtual
+      virtual void print(std::ostream& os) const                 // virtual with a default
+      {
+          os << std::left << std::setw(4) << type() << " #" << std::setw(4) << billNo <<
+  std::setw(8) << patient
+             << std::right << std::fixed << std::setprecision(2) << std::setw(11) << total();
+      }
+      const std::string& name() const noexcept { return patient; }
+  };
+
+  class OutPatientBill : public Bill {
+      double consultation, tests;
+  public:
+      OutPatientBill(const std::string& p, int no, double c, double t)
+          : Bill(p, no), consultation(checked(c, "consultation")), tests(checked(t, "tests"))
+  {}
+      double total() const override { return consultation + tests; }
+      std::string type() const override { return "OP"; }
+  };
+
+  class InPatientBill : public Bill {
+      int days; double perDay, procedures, medicines;
+  public:
+      InPatientBill(const std::string& p, int no, int d, double rate, double proc, double med)
+          : Bill(p, no), days(int(checked(d, "days"))), perDay(checked(rate, "room rate")),
+            procedures(checked(proc, "procedures")), medicines(checked(med, "medicines")) {}
+      double total() const override { return days * perDay + procedures + medicines; }
+      std::string type() const override { return "IP"; }
+      int stayDays() const { return days; }
+  };
+
+  class DayCareBill : public Bill {
+      std::string package; double price;
+      static double lookup(const std::string& code)
+      {
+          static const std::map<std::string, double> table = {
+              {"CATARACT", 25000}, {"DIALYSIS", 3500}, {"ENDOSCOPY", 8000}, {"CHEMO", 18000}};
+          auto it = table.find(code);
+          if (it == table.end()) throw UnknownPackageError("unknown day-care package: " +
+  code);
+          return it->second;
+      }
+  public:
+      DayCareBill(const std::string& p, int no, const std::string& code)
+          : Bill(p, no), package(code), price(lookup(code)) {}
+      double total() const override { return price; }
+      std::string type() const override { return "DC"; }
+      const std::string& packageCode() const { return package; }
+  };
+
+  class EmergencyBill : public Bill {
+      double base, hours, perHour;
+  public:
+      EmergencyBill(const std::string& p, int no, double b, double h, double rate)
+          : Bill(p, no), base(checked(b, "base charge")), hours(checked(h, "hours")),
+  perHour(checked(rate, "hourly rate")) {}
+      double total() const override { return base + hours * perHour; }
+      std::string type() const override { return "ER"; }
+  };
+
+
+
+
+NAVEEN KUMAR S (192424104) – Assignment 5 (CO5)                                                         Page 18 of 45
+
+========== ORIGINAL PDF PAGE 19 ==========
+                                                                               Object Oriented Programming with C++ (DSA01)
+
+
+  common/payers.h
+
+  // Abstract payer and concrete payers (Task A3)
+  #pragma once
+  #include <algorithm>
+  #include <map>
+  #include <string>
+  #include "bills.h"
+
+  class Payer {                                                    // ABSTRACT interface
+  public:
+      virtual ~Payer() = default;
+      virtual std::string name() const = 0;
+      virtual double amountCovered(const Bill& b) const = 0;      // may throw ClaimError
+  };
+
+  class SelfPay : public Payer {
+  public:
+      std::string name() const override { return "Self"; }
+      double amountCovered(const Bill&) const override { return 0; }   // patient pays
+  everything
+  };
+
+  class Insurance : public Payer {
+      std::string company; double coverLimit, coPayPercent;
+  public:
+      Insurance(const std::string& c, double limit, double copay)
+          : company(c), coverLimit(checked(limit, "cover limit")), coPayPercent(copay)
+      {
+          if (copay < 0 || copay > 100) throw InvalidChargeError("co-payment must be
+  0..100%");
+      }
+      std::string name() const override { return company; }
+      double amountCovered(const Bill& b) const override
+      {
+          double claim = b.total() * (100 - coPayPercent) / 100;    // insurer's share
+          if (claim > coverLimit)
+              throw ClaimError("claim " + std::to_string(long(claim)) + " exceeds cover " +
+  std::to_string(long(coverLimit)));
+          return claim;
+      }
+  };
+
+  class GovernmentScheme : public Payer {                          // fixed package rates
+      std::map<std::string, double> rates;                         // by bill type
+  public:
+      GovernmentScheme() : rates{{"OP", 500}, {"IP", 30000}, {"DC", 15000}, {"ER", 5000}} {}
+      std::string name() const override { return "GovtScheme"; }
+      double amountCovered(const Bill& b) const override
+      {
+          auto it = rates.find(b.type());
+          if (it == rates.end()) throw ClaimError("bill type " + b.type() + " not covered by
+  the scheme");
+          return std::min(it->second, b.total());                 // never more than the bill
+      }
+  };
+
+  struct Settlement { double covered, patientPays; };
+
+  inline Settlement settle(const Bill& b, const Payer& p)
+  {
+      double covered = p.amountCovered(b);                         // exceptions pass through
+      return {covered, b.total() - covered};
+  }
+
+
+  B1/validate.cpp
+
+
+
+
+NAVEEN KUMAR S (192424104) – Assignment 5 (CO5)                                                         Page 19 of 45
+
+========== ORIGINAL PDF PAGE 20 ==========
+                                                                               Object Oriented Programming with C++ (DSA01)
+
+
+
+  // B1.1 - One bill of each kind with each payer; totals verified by hand in the report
+  #include <memory>
+  #include <vector>
+  #include "../common/payers.h"
+
+  int main()
+  {
+      std::vector<std::unique_ptr<Bill>> bills;
+      bills.push_back(std::make_unique<OutPatientBill>("Ravi", 101, 500, 1200));
+      bills.push_back(std::make_unique<InPatientBill>("Meena", 102, 3, 2500, 40000, 6500));
+      bills.push_back(std::make_unique<DayCareBill>("Kumar", 103, "CATARACT"));
+      bills.push_back(std::make_unique<EmergencyBill>("Latha", 104, 2000, 5, 800));
+
+      std::vector<std::unique_ptr<Payer>> payers;
+      payers.push_back(std::make_unique<SelfPay>());
+      payers.push_back(std::make_unique<Insurance>("StarHealth", 60000, 10));
+      payers.push_back(std::make_unique<GovernmentScheme>());
+
+      double day = 0;
+      std::cout << "Type Bill  Patient       Total  Payer         Covered  Patient pays\n";
+      for (const auto& b : bills) {
+          day += b->total();                                          // runtime polymorphism
+          for (const auto& p : payers) {
+              b->print(std::cout);
+              try {
+                  Settlement s = settle(*b, *p);
+                  std::cout << "  " << std::left << std::setw(11) << p->name() << std::right
+                            << std::setw(10) << s.covered << std::setw(13) << s.patientPays
+  << '\n';
+              } catch (const ClaimError& e) {
+                  std::cout << "  " << std::left << std::setw(11) << p->name() << std::right
+  << "  REJECTED: " << e.what() << '\n';
+              }
+          }
+      }
+      std::cout << "Day's total of all bills: " << day << '\n';
+  }
+
+Executed under AddressSanitizer:
+
+  Output – B1/validate.out
+
+  Type Bill  Patient       Total  Payer         Covered  Patient pays
+  OP   #101 Ravi        1700.00  Self             0.00      1700.00
+  OP   #101 Ravi        1700.00  StarHealth    1530.00       170.00
+  OP   #101 Ravi        1700.00  GovtScheme     500.00      1200.00
+  IP   #102 Meena      54000.00  Self             0.00     54000.00
+  IP   #102 Meena      54000.00  StarHealth   48600.00      5400.00
+  IP   #102 Meena      54000.00  GovtScheme   30000.00     24000.00
+  DC   #103 Kumar      25000.00  Self             0.00     25000.00
+  DC   #103 Kumar      25000.00  StarHealth   22500.00      2500.00
+  DC   #103 Kumar      25000.00  GovtScheme   15000.00     10000.00
+  ER   #104 Latha       6000.00  Self             0.00      6000.00
+  ER   #104 Latha       6000.00  StarHealth    5400.00       600.00
+  ER   #104 Latha       6000.00  GovtScheme    5000.00      1000.00
+  Day's total of all bills: 86700.00
+  [exit status 0 – AddressSanitizer/LeakSanitizer reported no errors]
+
+Hand verification
+
+
+
+
+
+NAVEEN KUMAR S (192424104) – Assignment 5 (CO5)                                                         Page 20 of 45
+
+========== ORIGINAL PDF PAGE 21 ==========
+                                                                               Object Oriented Programming with C++ (DSA01)
+
+
+  Bill                         Total by       Self        Insurance (90 %,      Government (package rate)
+                       hand                    cover 60,000)
+
+ OP: 500 + 1,200        1,700      0 /        1,530 / 170         min(500, 1,700) = 500 /
+                                   1,700                        1,200
+
+  IP: 3 × 2,500 +        54,000     0 /        48,600 / 5,400      min(30,000, 54,000) =
+ 40,000 + 6,500                   54,000                      30,000 / 24,000
+
+ DC: CATARACT        25,000     0 /        22,500 / 2,500      15,000 / 10,000
+ package                         25,000
+
+ ER: 2,000 + 5 × 800    6,000      0 /        5,400 / 600         5,000 / 1,000
+                                   6,000
+
+ Day's total           86,700
+
+All twelve settlements and the day's total agree with the program.
+
+B1.2 – Comparison with the Part A Design (1 Mark)
+
+The implementation follows the A1 and A3 UML exactly. Changes made while coding:
+(1) a billNo was added for audit and reporting; (2) copying of Bill was deleted to
+make  slicing  impossible, which  led  to  storing  bills as  std::unique_ptr<Bill> ;  (3)
+validation was placed in a single helper  checked()  called from every constructor's
+initialiser  list, so an invalid  bill can never be constructed;  (4)  print()  takes an
+std::ostream& so it can also write to a file.
+
+B1.3 – Prove Runtime Binding (2 Marks)
+
+  B1/binding.cpp
+
+  // B1.3 - Prove runtime binding: total() virtual (default) or not (-DNO_VIRTUAL_TOTAL)
+  #include <iostream>
+  #include <string>
+  #ifdef NO_VIRTUAL_TOTAL
+  #define V
+  #define OVR
+  #else
+  #define V virtual
+  #define OVR override
+  #endif
+  struct Bill {
+      std::string patient;
+      explicit Bill(const std::string& p) : patient(p) {}
+      virtual ~Bill() = default;
+      V double total() const { return 0; }          // must have a body once it is not pure
+  virtual
+  };
+  struct OutPatient : Bill {
+      double c, t;
+      OutPatient(const std::string& p, double cc, double tt) : Bill(p), c(cc), t(tt) {}
+      double total() const OVR { return c + t; }
+  };
+  struct InPatient : Bill {
+      int d; double r, s;
+      InPatient(const std::string& p, int dd, double rr, double ss) : Bill(p), d(dd), r(rr),
+  s(ss) {}
+      double total() const OVR { return d * r + s; }
+  };
+  int main()
+
+
+NAVEEN KUMAR S (192424104) – Assignment 5 (CO5)                                                         Page 21 of 45
+
+========== ORIGINAL PDF PAGE 22 ==========
+                                                                               Object Oriented Programming with C++ (DSA01)
+
+
+
+  {
+      Bill* bills[] = {new OutPatient("Ravi", 500, 1200), new InPatient("Meena", 3, 2500,
+  40000)};
+      double sum = 0;
+      for (Bill* b : bills) { std::cout << b->patient << ": " << b->total() << '\n'; sum += b-
+  >total(); }
+      std::cout << "Total " << sum << '\n';
+      for (Bill* b : bills) delete b;
+  }
+
+With virtual :
+
+  Output – B1/binding_virtual.out
+
+  Ravi: 1700
+  Meena: 47500
+  Total 49200
+
+With virtual removed ( -DNO_VIRTUAL_TOTAL ; total() then needs a body in Bill ):
+
+  Output – B1/binding_novirtual.out
+
+  Ravi: 0
+  Meena: 0
+  Total 0
+
+Without  virtual , the  call  b->total()  through  Bill*  is bound at compile time to
+Bill::total() and every bill totals 0 – the derived functions are hidden, not overridden.
+
+B1.4 – Prove the Virtual Destructor (2 Marks)
+
+The B1.1 program built with  -DNO_VIRTUAL_DTOR (the destructor of  Bill  is no longer
+virtual) runs correctly until the bills are destroyed; then AddressSanitizer stops it:
+
+
+
+
+
+NAVEEN KUMAR S (192424104) – Assignment 5 (CO5)                                                         Page 22 of 45
+
+========== ORIGINAL PDF PAGE 23 ==========
+                                                                               Object Oriented Programming with C++ (DSA01)
+
+
+  Output – B1/validate_nvd.out
+
+  Type Bill  Patient       Total  Payer         Covered  Patient pays
+  OP   #101 Ravi        1700.00  Self             0.00      1700.00
+  OP   #101 Ravi        1700.00  StarHealth    1530.00       170.00
+  OP   #101 Ravi        1700.00  GovtScheme     500.00      1200.00
+  IP   #102 Meena      54000.00  Self             0.00     54000.00
+  IP   #102 Meena      54000.00  StarHealth   48600.00      5400.00
+  IP   #102 Meena      54000.00  GovtScheme   30000.00     24000.00
+  DC   #103 Kumar      25000.00  Self             0.00     25000.00
+  DC   #103 Kumar      25000.00  StarHealth   22500.00      2500.00
+  DC   #103 Kumar      25000.00  GovtScheme   15000.00     10000.00
+  ER   #104 Latha       6000.00  Self             0.00      6000.00
+  ER   #104 Latha       6000.00  StarHealth    5400.00       600.00
+  ER   #104 Latha       6000.00  GovtScheme    5000.00      1000.00
+  Day's total of all bills: 86700.00
+  ==3358==ERROR: AddressSanitizer: new-delete-type-mismatch on 0x… in thread T0:
+    size of the allocated type:   64 bytes;
+    size of the deallocated type: 48 bytes.
+      #0 0x… in operator delete(void*, unsigned long) asan_new_delete.cpp:164
+      #1 0x… in std::default_delete<Bill>::operator()(Bill*) const /usr/include/c++/13/bits/
+  unique_ptr.h:99
+      #8 0x… in main B1/validate.cpp:35
+  0x… is located 0 bytes inside of 64-byte region [0x…,0x…)
+  allocated by thread T0 here:
+      #0 0x… in operator new(unsigned long) asan_new_delete.cpp:95
+      #2 0x… in main B1/validate.cpp:9
+  SUMMARY: AddressSanitizer: new-delete-type-mismatch asan_new_delete.cpp:164 in operator
+  delete(void*, unsigned long)
+  ==3358==HINT: if you don't care about these errors you may set
+  ASAN_OPTIONS=new_delete_type_mismatch=0
+
+The unique_ptr<Bill> deleted a 64-byte OutPatientBill as a 48-byte Bill : the derived
+destructor did not run (its data would leak if it owned any), and the deallocation was
+given the wrong size. With the virtual destructor the same program produced a clean
+report (B1.1).
+
+Complete the Code
+
+  B1/complete.cpp
+
+  #include <iostream>
+  #include <string>
+
+  class Bill {
+  protected:
+      std::string patient;
+  public:
+      explicit Bill(const std::string& p) : patient(p) {}
+      virtual ~Bill() = default;
+      // TODO 1 (completed): pure virtual total() and virtual type() returning "Bill"
+  #ifndef NO_VIRTUAL
+      virtual double total() const = 0;
+  #else
+      double total() const = 0;               // experiment: 'virtual' removed
+  #endif
+      virtual std::string type() const { return "Bill"; }
+      void print() const
+      {
+          std::cout << type() << ' ' << patient << ": " << total() << '\n';
+      }
+  };
+
+  class OutPatient : public Bill {
+      double consultation, tests;
+  public:
+
+
+NAVEEN KUMAR S (192424104) – Assignment 5 (CO5)                                                         Page 23 of 45
+
+========== ORIGINAL PDF PAGE 24 ==========
+                                                                               Object Oriented Programming with C++ (DSA01)
+
+
+
+      OutPatient(const std::string& p, double c, double t)
+          : Bill(p), consultation(c), tests(t) {}
+      // TODO 2 (completed)
+      double total() const override { return consultation + tests; }
+      std::string type() const override { return "OP"; }
+  };
+
+  class InPatient : public Bill {
+      int days;
+      double perDay, surgery;
+  public:
+      InPatient(const std::string& p, int d, double rate, double s)
+          : Bill(p), days(d), perDay(rate), surgery(s) {}
+      // TODO 3 (completed)
+      double total() const override { return days * perDay + surgery; }
+      std::string type() const override { return "IP"; }
+  };
+
+  int main()
+  {
+      Bill* bills[] = {new OutPatient("Ravi", 500, 1200),
+                       new InPatient("Meena", 3, 2500, 40000)};
+      double sum = 0;
+      for (Bill* b : bills) {
+          b->print();                 // runtime polymorphism
+          sum += b->total();
+      }
+      std::cout << "Total " << sum << '\n';
+      for (Bill* b : bills) delete b;   // virtual destructor runs the right destructor
+  }
+
+
+  Output – B1/complete.out
+
+  OP Ravi: 1700
+  IP Meena: 47500
+  Total 49200
+
+The output matches the expected output (1,700 + 47,500 = 49,200). Removing
+virtual from total() ( -DNO_VIRTUAL ):
+
+  Output – B1/complete_novirtual.out
+
+  complete.cpp:14:12: error: initializer specified for non-virtual method 'double Bill::total()
+  const'
+     14 |     double total() const = 0;               // experiment: 'virtual' removed
+        |            ^~~~~
+  complete.cpp:29:12: error: 'double OutPatient::total() const' marked 'override', but does not
+  override
+     29 |     double total() const override { return consultation + tests; }
+        |            ^~~~~
+  complete.cpp:40:12: error: 'double InPatient::total() const' marked 'override', but does not
+  override
+     40 |     double total() const override { return days * perDay + surgery; }
+        |            ^~~~~
+
+The = 0 pure-specifier is allowed only on a virtual function, so double total() const = 0;
+is ill-formed; and because Bill::total() is no longer virtual, the override specifiers in
+OutPatient and  InPatient refer to nothing and are also rejected. The compiler thus
+protects the design: an abstract interface cannot accidentally lose its dynamic binding.
+
+
+
+
+
+NAVEEN KUMAR S (192424104) – Assignment 5 (CO5)                                                         Page 24 of 45
+
+========== ORIGINAL PDF PAGE 25 ==========
+                                                                               Object Oriented Programming with C++ (DSA01)
+
+Alternative Concept and Complexity Analysis – Templates (Compile-Time
+Polymorphism)
+
+  B1/templates_alt.cpp
+
+  // B1 - Alternative: compile-time polymorphism with templates, one container per bill type
+  #include <iostream>
+  #include <vector>
+  struct OP { double c, t; double total() const { return c + t; } };
+  struct IP { int d; double r, s; double total() const { return d * r + s; } };
+
+  template <class B> double sumAll(const std::vector<B>& v)      // instantiated per type, no
+  virtual call
+  {
+      double s = 0;
+      for (const B& b : v) s += b.total();
+      return s;
+  }
+  int main()
+  {
+      std::vector<OP> ops = {{500, 1200}, {400, 0}};
+      std::vector<IP> ips = {{3, 2500, 40000}};
+      std::cout << "OP total " << sumAll(ops) << ", IP total " << sumAll(ips)
+                << ", day total " << sumAll(ops) + sumAll(ips) << '\n';
+      std::cout << "sizeof(OP) = " << sizeof(OP) << " (no vptr), sizeof(IP) = " << sizeof(IP)
+  << '\n';
+      // std::vector<???> all = {OP{...}, IP{...}};   // impossible: no common type to put in
+  one list
+  }
+
+
+  Output – B1/templates_alt.out
+
+  OP total 2100, IP total 47500, day total 49600
+  sizeof(OP) = 16 (no vptr), sizeof(IP) = 24
+
+  Criterion                    Virtual functions (one list of   Templates (one container per type)
+                        Bill* )
+
+ Time per bill          one indirect call; not       direct call, inlined – no dispatch cost
+                            inlinable
+
+ Space                   vptr (8 B) per object + a   no vptr (OP is 16 B); one container per
+                          pointer per bill           type
+
+ One list of all bills (in   yes                 no – no common type; order across types is
+  arrival order)                                           lost
+
+ New bill type         new class             new class and a new container, new loop
+                                            and new sumAll call everywhere
+
+ Run-time choice of      natural                   impossible without another dispatch
+ type (from input)                            mechanism
+
+What is lost is exactly what the hospital needs: one list of the day's bills of all types,
+processed in order.
+
+
+
+
+
+NAVEEN KUMAR S (192424104) – Assignment 5 (CO5)                                                         Page 25 of 45
